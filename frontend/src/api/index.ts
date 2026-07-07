@@ -4,6 +4,7 @@ import type {
   StudentCreate,
   GradeItem,
   GradeRefreshResult,
+  GpaSummary,
   MonitorStatus,
   MonitorHistoryItem,
 } from '../types'
@@ -42,6 +43,9 @@ export const getGrades = (studentId: string) =>
 
 export const refreshGrades = (studentId: string) =>
   api.post<GradeRefreshResult>(`/grades/${studentId}/refresh`).then(r => r.data)
+
+export const getGpaSummary = (studentId: string) =>
+  api.get<GpaSummary>(`/grades/${studentId}/summary`).then(r => r.data)
 
 // Monitor
 export const getMonitorStatus = () =>

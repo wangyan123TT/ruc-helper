@@ -1,5 +1,5 @@
 """
-成绩查询 + 比对 + 邮件通知
+成绩查询 + 比对 + 排名 + 邮件通知
 """
 import json
 import requests
@@ -14,8 +14,15 @@ from ..schemas import GradeResponse
 
 BASE_URL = "https://jw.ruc.edu.cn"
 GRADE_API_PATH = "/resService/jwxtpt/v1/xsd/cjgl_xsxdsq/findKccjList"
-RESOURCE_CODE = "XSMH0526"
-API_CODE = "jw.xsd.xsdInfo.controller.CjglKccjckController.findKccjList"
+RANK_API_PATH = "/resService/jwxtpt/v1/xsd/cjgl_xsxdsq/professionalRankingQuery"
+SUMMARY_API_PATH = "/resService/jwxtpt/v1/xsd/cjgl_xsxdsq/findKccjTjsjList"
+RANK_PJXFJD_PATH = "/resService/jwxtpt/v1/xsd/xsd_cjpmck/findCjglpjxfjdpm"
+RANK_SSPJ_PATH = "/resService/jwxtpt/v1/xsd/xsd_cjpmck/findCjglsspjcjpm"
+RANK_XFJQ_PATH = "/resService/jwxtpt/v1/xsd/xsd_cjpmck/findCjglxfjqpjcjpm"
+
+RESOURCE_0526 = "XSMH0526"
+RESOURCE_0527 = "XSMH0527"
+RESOURCE_0511 = "XSMH0511"
 
 TZ = timezone(timedelta(hours=8))
 
@@ -66,12 +73,49 @@ def build_headers(res_token: str, session: str, authcode: str) -> dict:
 
 def fetch_grades_from_api(res_token: str, session: str, authcode: str) -> list[dict] | None:
     """从教务 API 拉取成绩原始数据"""
-    url = f"{BASE_URL}{GRADE_API_PATH}?resourceCode={RESOURCE_CODE}&apiCode={API_CODE}"
+    url = f"{BASE_URL}{GRADE_API_PATH}?resourceCode={RESOURCE_0526}&apiCode=jw.xsd.xsdInfo.controller.CjglKccjckController.findKccjList"
     headers = build_headers(res_token, session, authcode)
+    return _post_json(url, {}, headers)
 
+
+def fetch_ranking(res_token: str, session: str, authcode: str) -> dict | None:
+    """并行拉取专业排名 + 学期汇总 + 三种排名"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    headers = build_headers(res_token, session, authcode)
+    result = {}
+
+    def _fetch(name, url):
+        r = _post_json(url, {}, headers)
+        return name, r
+
+    urls = [
+        ("major_rank", f"{BASE_URL}{RANK_API_PATH}?resourceCode={RESOURCE_0527}&apiCode=jw.xsd.xsdInfo.controller.CjglKccjckController.professionalRankingQuery"),
+        ("semester_summary", f"{BASE_URL}{SUMMARY_API_PATH}?resourceCode={RESOURCE_0526}&apiCode=jw.xsd.xsdInfo.controller.CjglKccjckController.findKccjTjsjList"),
+        ("gpa_rank", f"{BASE_URL}{RANK_PJXFJD_PATH}?resourceCode={RESOURCE_0511}&apiCode=jw.xsd.xsdInfo.controller.XsdCjpmckController.findCjglpjxfjdpm"),
+        ("avg_rank", f"{BASE_URL}{RANK_SSPJ_PATH}?resourceCode={RESOURCE_0511}&apiCode=jw.xsd.xsdInfo.controller.XsdCjpmckController.findCjglsspjcjpm"),
+        ("weighted_rank", f"{BASE_URL}{RANK_XFJQ_PATH}?resourceCode={RESOURCE_0511}&apiCode=jw.xsd.xsdInfo.controller.XsdCjpmckController.findCjglxfjqpjcjpm"),
+    ]
+
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        futures = {ex.submit(_fetch, name, url): name for name, url in urls}
+        for f in as_completed(futures):
+            name, r = f.result()
+            if r:
+                if name == "major_rank" and len(r) > 0:
+                    result[name] = r[0]
+                elif name == "semester_summary":
+                    result[name] = r
+                elif r.get("items"):
+                    result[name] = r["items"][0]
+
+    return result if result else None
+
+
+def _post_json(url: str, body: dict, headers: dict) -> any:
+    """POST JSON，3次重试"""
     for attempt in range(3):
         try:
-            resp = requests.post(url, json={}, headers=headers, timeout=30)
+            resp = requests.post(url, json=body, headers=headers, timeout=30)
         except Exception as e:
             print(f"[grade] 网络异常 (尝试{attempt+1}/3): {e}")
             if attempt < 2:
@@ -95,8 +139,37 @@ def fetch_grades_from_api(res_token: str, session: str, authcode: str) -> list[d
             return None
 
         return data.get("data", [])
-
     return None
+
+
+def compute_real_gpa(grades: list[Grade]) -> dict:
+    """计算真实 GPA（排除 P/F 课 cjfscode=3）"""
+    total_points = 0.0
+    total_credits = 0.0
+    total_weighted_score = 0.0
+    total_raw_score = 0.0
+    course_count = 0
+
+    for g in grades:
+        if g.cjfscode == "3" or g.score in ("P", "-", ""):
+            continue
+        try:
+            score = float(g.score)
+        except (ValueError, TypeError):
+            continue
+        total_points += g.grade_point if g.grade_point else 0  # grade_point 已是 绩点×学分
+        total_credits += g.credit
+        total_weighted_score += score * g.credit
+        total_raw_score += score
+        course_count += 1
+
+    return {
+        "gpa": round(total_points / total_credits, 2) if total_credits > 0 else 0,
+        "weighted_avg": round(total_weighted_score / total_credits, 1) if total_credits > 0 else 0,
+        "simple_avg": round(total_raw_score / course_count, 1) if course_count > 0 else 0,
+        "credits": total_credits,
+        "courses": course_count,
+    }
 
 
 def sync_grades(db: Session, student: Student, raw_grades: list[dict]) -> dict:
@@ -189,61 +262,133 @@ def sync_grades(db: Session, student: Student, raw_grades: list[dict]) -> dict:
     }
 
 
-def send_grade_email(to_address: str, student_name: str, new_grades: list, updated_grades: list):
-    """发送成绩变动通知邮件（HTML 格式）"""
+def send_grade_email(to_address: str, student_name: str, new_grades: list, updated_grades: list,
+                     ranking: dict | None = None, real_gpa: dict | None = None):
+    """发送成绩变动通知邮件"""
     if not EMAIL_CONFIG.get("smtpUsername"):
         print("[email] 未配置 SMTP，跳过邮件发送")
         return False
-
     if not to_address:
         print("[email] 未配置收件邮箱")
         return False
 
     now_str = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
 
-    def _row(g, highlight=False):
-        score = getattr(g, 'score', '-')
-        return f"""<tr{' style=background:#f0faf5' if highlight else ''}>
-            <td style='padding:6px 10px;border-bottom:1px solid #eee'>{g.course_name}</td>
-            <td style='padding:6px 10px;border-bottom:1px solid #eee;text-align:center;font-weight:bold;color:#1a5276'>{score}</td>
-            <td style='padding:6px 10px;border-bottom:1px solid #eee;text-align:center'>{g.credit}</td>
-            <td style='padding:6px 10px;border-bottom:1px solid #eee;text-align:center'>{g.grade_point}</td>
-            <td style='padding:6px 10px;border-bottom:1px solid #eee'>{g.teacher}</td>
-            <td style='padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;color:#888'>{g.semester}</td>
-        </tr>"""
+    # ── 样式 ──
+    css = "body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1a1a2e;line-height:1.5}"
+    box = "border-radius:10px;padding:20px;margin:16px 0"
+    th_style = "padding:8px 12px;text-align:left;font-size:12px;font-weight:600;color:#666;border-bottom:2px solid #e0e0e0"
+    td_style = "padding:8px 12px;border-bottom:1px solid #f0f0f0;font-size:13px"
+    num = ";text-align:right;font-variant-numeric:tabular-nums"
+    h3 = "margin:0 0 12px;font-size:15px"
 
-    parts = []
-    if new_grades:
-        rows = "".join(_row(g, True) for g in new_grades)
-        parts.append(f"""<h3 style='color:#27ae60'>新增 {len(new_grades)} 门</h3>
-        <table style='width:100%;border-collapse:collapse;font-size:13px;font-family:sans-serif'>
-        <tr style='background:#f8f8fb'><th style='padding:8px;text-align:left'>课程</th><th>成绩</th><th>学分</th><th>绩点</th><th>教师</th><th>学期</th></tr>
-        {rows}</table>""")
-    if updated_grades:
-        rows = "".join(_row(g) for g in updated_grades)
-        parts.append(f"""<h3 style='color:#e67e22'>更新 {len(updated_grades)} 门</h3>
-        <table style='width:100%;border-collapse:collapse;font-size:13px;font-family:sans-serif'>
-        <tr style='background:#f8f8fb'><th style='padding:8px;text-align:left'>课程</th><th>成绩</th><th>学分</th><th>绩点</th><th>教师</th><th>学期</th></tr>
-        {rows}</table>""")
+    # ── GPA 分组表 ──
+    mr = (ranking or {}).get("major_rank", {}) or {}
+    gpa_r = (ranking or {}).get("gpa_rank", {}) or {}
+    avg_r = (ranking or {}).get("avg_rank", {}) or {}
+    wgt_r = (ranking or {}).get("weighted_rank", {}) or {}
+    ss = (ranking or {}).get("semester_summary", []) or []
 
-    body = f"""<div style='max-width:600px;margin:0 auto;font-family:sans-serif'>
-        <h2>RUC Helper — 成绩变动通知</h2>
-        <p>{student_name}，{now_str}</p>
-        {"".join(parts)}
-        <p style='margin-top:20px;font-size:12px;color:#999'>此邮件由 RUC Helper 自动发送</p>
+    gpa_rows = ""
+    # Group 1: GPA
+    gpa_rows += f"<tr><td style='{td_style};font-weight:600'>平均学分绩点</td>"
+    gpa_rows += f"<td style='{td_style}{num};font-size:20px;font-weight:700;color:#1a1a2e'>{mr.get('pjxfjd','') or (real_gpa or {}).get('gpa','')}</td>"
+    gpa_rows += f"<td style='{td_style}{num}'>专业第{mr.get('pm','?')}</td>"
+    gpa_rows += f"<td style='{td_style}{num}'>班级第{mr.get('bjpm','?')}</td></tr>"
+
+    if gpa_r:
+        gpa_rows += f"<tr><td style='{td_style};color:#999'>  └ 含P/F课</td>"
+        gpa_rows += f"<td style='{td_style}{num};color:#999'>{gpa_r.get('pjxfjd','')}</td>"
+        gpa_rows += f"<td style='{td_style}{num}'colspan=2>班级第{gpa_r.get('pm','?')}</td></tr>"
+
+    # Group 2: Weighted avg
+    gpa_rows += f"<tr><td style='{td_style};font-weight:600'>学分加权平均分</td>"
+    gpa_rows += f"<td style='{td_style}{num};font-size:18px;font-weight:600'>{mr.get('pjxfj','') or (real_gpa or {}).get('weighted_avg','')}</td>"
+    gpa_rows += f"<td style='{td_style}{num}'colspan=2>{'班级第'+str(wgt_r.get('pm','?')) if wgt_r else ''}</td></tr>"
+
+    # Group 3: Simple avg
+    gpa_rows += f"<tr><td style='{td_style};font-weight:600'>算术平均分</td>"
+    gpa_rows += f"<td style='{td_style}{num};font-size:18px;font-weight:600'>{avg_r.get('xssscj','') or (real_gpa or {}).get('simple_avg','')}</td>"
+    gpa_rows += f"<td style='{td_style}{num}'colspan=2>{'班级第'+str(avg_r.get('pm','?')) if avg_r else ''}</td></tr>"
+
+    # Semester summary
+    sem_rows = ""
+    if ss:
+        for s in ss:
+            sem_rows += f"<tr><td style='{td_style}'>{s.get('jczy013id','')}</td><td style='{td_style}{num}'>{s.get('kcnum','')}门</td><td style='{td_style}{num}'>{s.get('zxf','')}学分</td><td style='{td_style}{num}'>GPA {s.get('pjxfjd','')}</td><td style='{td_style}{num}'>均分{s.get('pjxfj','')}</td></tr>"
+
+    info = f"{mr.get('ndzy_name','')} {mr.get('skdw_name','')}" if mr else ""
+    courses_info = f"{(real_gpa or {}).get('courses','')}门 / {(real_gpa or {}).get('credits','')}学分" if real_gpa else ""
+
+    # ── 成绩变动表格 ──
+    grade_rows = ""
+    for g in (new_grades or []):
+        grade_rows += f"<tr style='background:#f2faf5'>"
+        grade_rows += f"<td style='{td_style}'>{g.course_name}</td>"
+        grade_rows += f"<td style='{td_style}{num};font-weight:700;font-size:16px'>{getattr(g,'score','-')}</td>"
+        grade_rows += f"<td style='{td_style}{num}'>{g.credit}</td>"
+        grade_rows += f"<td style='{td_style}{num}'>{g.daily_score or '-'}</td>"
+        grade_rows += f"<td style='{td_style}{num}'>{g.midterm_score or '-'}</td>"
+        grade_rows += f"<td style='{td_style}{num}'>{g.final_score or '-'}</td>"
+        grade_rows += f"<td style='{td_style}{num}'>{g.grade_point}</td>"
+        grade_rows += f"<td style='{td_style}'>{g.teacher}</td></tr>"
+
+    for g in (updated_grades or []):
+        grade_rows += f"<tr style='background:#fef9f0'>"
+        grade_rows += f"<td style='{td_style}'>{g.course_name}</td>"
+        grade_rows += f"<td style='{td_style}{num};font-weight:700;font-size:16px'>{getattr(g,'score','-')}</td>"
+        grade_rows += f"<td style='{td_style}{num}'>{g.credit}</td>"
+        grade_rows += f"<td style='{td_style}{num}'>{g.daily_score or '-'}</td>"
+        grade_rows += f"<td style='{td_style}{num}'>{g.midterm_score or '-'}</td>"
+        grade_rows += f"<td style='{td_style}{num}'>{g.final_score or '-'}</td>"
+        grade_rows += f"<td style='{td_style}{num}'>{g.grade_point}</td>"
+        grade_rows += f"<td style='{td_style}'>{g.teacher}</td></tr>"
+
+    # ── 组装 ──
+    body = f"""<html><head><meta charset=utf-8><style>{css}</style></head><body>
+    <div style='max-width:640px;margin:0 auto;padding:20px'>
+
+    <h2 style='margin:0 0 4px;font-size:20px'>成绩变动通知</h2>
+    <p style='margin:0 0 20px;color:#999;font-size:13px'>{student_name} · {now_str} · {info} · {courses_info}</p>
+
+    <div style='background:#f8f9fb;{box}'>
+    <h3 style='{h3};color:#1a1a2e'>当前成绩总览</h3>
+    <table style='width:100%;border-collapse:collapse'>
+    <tr><th style='{th_style}'>指标</th><th style='{th_style}{num}'>分数</th><th style='{th_style}{num}'>排名</th><th style='{th_style}{num}'>排名2</th></tr>
+    {gpa_rows}
+    </table>
     </div>"""
+
+    if grade_rows:
+        body += f"""
+        <div style='{box}'>
+        <h3 style='{h3};color:#1a1a2e'>成绩变动</h3>
+        <table style='width:100%;border-collapse:collapse'>
+        <tr><th style='{th_style}'>课程</th><th style='{th_style}{num}'>成绩</th><th style='{th_style}{num}'>学分</th><th style='{th_style}{num}'>平时</th><th style='{th_style}{num}'>期中</th><th style='{th_style}{num}'>期末</th><th style='{th_style}{num}'>绩点</th><th style='{th_style}'>教师</th></tr>
+        {grade_rows}
+        </table>
+        </div>"""
+
+    if sem_rows:
+        body += f"""
+        <div style='background:#f8f9fb;{box}'>
+        <h3 style='{h3};color:#1a1a2e'>各学期汇总</h3>
+        <p style='margin:0 0 8px;font-size:11px;color:#999'>系统核算（含P/F课按1.0绩点计入），真实GPA见上方总览</p>
+        <table style='width:100%;border-collapse:collapse'>
+        <tr><th style='{th_style}'>学期</th><th style='{th_style}{num}'>课程</th><th style='{th_style}{num}'>学分</th><th style='{th_style}{num}'>GPA</th><th style='{th_style}{num}'>均分</th></tr>
+        {sem_rows}
+        </table></div>"""
+
+    body += """<p style='margin-top:24px;font-size:11px;color:#bbb'>RUC Helper 自动发送</p></div></body></html>"""
 
     try:
         msg = MIMEText(body, "html", "utf-8")
         msg["From"] = EMAIL_CONFIG["fromAddress"]
         msg["To"] = to_address
-        parts = []
-        if new_grades:
-            parts.append(f"新出{len(new_grades)}门")
-        if updated_grades:
-            parts.append(f"更新{len(updated_grades)}门")
-        msg["Subject"] = f"[成绩通知] {'，'.join(parts)}"
-
+        subj = []
+        if new_grades: subj.append(f"新出{len(new_grades)}门")
+        if updated_grades: subj.append(f"更新{len(updated_grades)}门")
+        msg["Subject"] = f"[成绩通知] {'，'.join(subj)}" if subj else "[成绩通知]"
         server = smtplib.SMTP(EMAIL_CONFIG["smtpHost"], EMAIL_CONFIG["smtpPort"], timeout=15)
         server.starttls()
         server.login(EMAIL_CONFIG["smtpUsername"], EMAIL_CONFIG["smtpPassword"])

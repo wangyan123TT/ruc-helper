@@ -66,3 +66,30 @@ export interface MonitorHistoryItem {
   grade_ids: string[]
   sent_at: string
 }
+
+export interface GpaSummary {
+  student_id: string
+  gpa: number
+  weighted_avg: number
+  simple_avg: number
+  credits: number
+  courses: number
+  api_gpa: number | null
+  major_name: string
+  dept_name: string
+  class_rank: string
+  major_rank: string
+  gpa_rank: string
+  avg_rank: string
+  weighted_rank: string
+  semester_summary: SemesterSummaryItem[]
+}
+
+export interface SemesterSummaryItem {
+  jczy013id: string
+  zxf: number
+  kcnum: number
+  pjxfjd: number
+  pjxfj: number
+  sumjd: number
+}

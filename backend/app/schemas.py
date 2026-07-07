@@ -83,6 +83,31 @@ class MonitorHistoryItem(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── GPA Summary ──
+
+class GpaSummary(BaseModel):
+    student_id: str
+    gpa: float = 0
+    weighted_avg: float = 0
+    simple_avg: float = 0
+    credits: float = 0
+    courses: int = 0
+    api_gpa: float | None = None       # 系统 GPA（含P/F课）
+    major_name: str = ""
+    dept_name: str = ""
+    class_rank: str = ""                # 班级排名
+    major_rank: str = ""                # 专业排名
+    gpa_rank: str = ""                  # GPA班排
+    avg_rank: str = ""                  # 算术平均班排
+    weighted_rank: str = ""             # 学分加权班排
+    gpa_rank_score: str = ""            # GPA班排分数
+    avg_rank_score: str = ""            # 算术平均班排分数
+    weighted_rank_score: str = ""       # 学分加权班排分数
+    semester_summary: list[dict] = []   # 各学期汇总
+
+    model_config = {"from_attributes": True}
+
+
 # ── Common ──
 
 class MessageResponse(BaseModel):

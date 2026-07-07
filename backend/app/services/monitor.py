@@ -8,9 +8,9 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 
 from ..database import SessionLocal
-from ..models import Student, NotificationLog, MonitorLog, Setting, now
+from ..models import Student, Grade, NotificationLog, MonitorLog, Setting, now
 from .auth import do_login, decrypt_password
-from .grade import fetch_grades_from_api, sync_grades, send_grade_email, EMAIL_CONFIG
+from .grade import fetch_grades_from_api, fetch_ranking, sync_grades, send_grade_email, compute_real_gpa, EMAIL_CONFIG
 
 TZ = timezone(timedelta(hours=8))
 
@@ -76,18 +76,24 @@ def poll_student_sync(db: Session, student: Student) -> dict:
     new_count = sync_result["new_count"]
     updated_count = sync_result["updated_count"]
 
+    # 拉取排名 + 真实 GPA（不管有没有成绩变动都拉）
+    ranking = fetch_ranking(student.res_token, student.session, student.authcode)
+    all_grades = db.query(Grade).filter(Grade.student_id == student_id).all()
+    real_gpa = compute_real_gpa(all_grades)
+
     if new_count == 0 and updated_count == 0:
-        _log("noop", f"无变化 ({sync_result['total']}门)")
-        return {"ok": True, "new": 0, "updated": 0, "error": ""}
+        _log("noop", f"无变化 (共{sync_result['total']}门, GPA {real_gpa['gpa']})")
+        return {"ok": True, "new": 0, "updated": 0, "error": "", "real_gpa": real_gpa, "ranking": ranking}
 
     print(f"[monitor] {student_id} 变化: 新增{new_count} 更新{updated_count}")
-    _log("ok", f"新增{new_count}门 更新{updated_count}门 (共{sync_result['total']}门)")
+    _log("ok", f"新增{new_count}门 更新{updated_count}门 (共{sync_result['total']}门, GPA {real_gpa['gpa']})")
 
-    # 先发送邮件，成功后再记录日志
+    # 发送邮件（含排名和真实 GPA）
     email_sent = False
     if student.email:
         email_sent = send_grade_email(student.email, student.name or student_id,
-                                      sync_result["new_grades"], sync_result["updated_grades"])
+                                      sync_result["new_grades"], sync_result["updated_grades"],
+                                      ranking=ranking, real_gpa=real_gpa)
 
     if email_sent:
         grade_ids = [g.cjgl016id for g in sync_result["new_grades"] + sync_result["updated_grades"]]
@@ -98,7 +104,8 @@ def poll_student_sync(db: Session, student: Student) -> dict:
         db.commit()
 
     return {"ok": True, "new": new_count, "updated": updated_count,
-            "new_grades": sync_result["new_grades"], "updated_grades": sync_result["updated_grades"]}
+            "new_grades": sync_result["new_grades"], "updated_grades": sync_result["updated_grades"],
+            "real_gpa": real_gpa, "ranking": ranking}
 
 
 async def _poll_student(db: Session, student: Student):
