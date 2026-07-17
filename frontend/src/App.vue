@@ -34,6 +34,9 @@
   --shadow-md: 0 4px 16px rgba(15,15,35,0.08);
   --shadow-lg: 0 12px 40px rgba(15,15,35,0.12);
   --font: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  /* 数据字面：学号/绩点/门数是数据不是正文，等宽+等距数字才对得齐 */
+  --font-data: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas,
+               'Noto Sans SC', monospace;
   --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 

@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { getStudent, getGrades, refreshGrades, reloginStudent, getGpaSummary, getTimetable } from '../api'
+import {
+  getStudent, getGrades, refreshGrades, reloginStudent, getGpaSummary, getTimetable,
+  toggleMonitorStudent, testEmailStudent, updateStudentEmail, deleteStudent,
+} from '../api'
 import type { Student, GradeItem, GradeRefreshResult, GpaSummary, TimetableData } from '../types'
 import GradeTable from '../components/GradeTable.vue'
 import TimetableGrid from '../components/TimetableGrid.vue'
@@ -16,6 +19,66 @@ const refreshing = ref(false)
 const result = ref<GradeRefreshResult | null>(null)
 const gpaSummary = ref<GpaSummary | null>(null)
 let _reqGen = 0
+
+// ── 档案操作（从首页搬下来：首页只管认人，操作在各自档案里）──
+const monitorBusy = ref(false)
+const emailInput = ref('')
+const emailBusy = ref(false)
+const testBusy = ref(false)
+const notice = ref<{ text: string; ok: boolean } | null>(null)
+
+const seal = computed(() =>
+  (student.value?.name || student.value?.student_id || '').slice(0, 3))
+
+function say(text: string, ok = true) {
+  notice.value = { text, ok }
+  setTimeout(() => { notice.value = null }, 4000)
+}
+
+async function toggleMonitor() {
+  if (!student.value) return
+  monitorBusy.value = true
+  try {
+    student.value = await toggleMonitorStudent(props.id)
+    say(student.value.is_monitored ? '已加入监控' : '已移出监控')
+  } catch (e: any) {
+    say(e.response?.data?.detail || '操作失败', false)
+  }
+  monitorBusy.value = false
+}
+
+async function saveEmail() {
+  if (!student.value || emailInput.value === student.value.email) return
+  emailBusy.value = true
+  try {
+    student.value = await updateStudentEmail(props.id, emailInput.value)
+    say(emailInput.value ? '通知邮箱已更新' : '已清空通知邮箱')
+  } catch (e: any) {
+    say(e.response?.data?.detail || '保存失败', false)
+  }
+  emailBusy.value = false
+}
+
+async function sendTest() {
+  testBusy.value = true
+  try {
+    const r = await testEmailStudent(props.id) as any
+    say(r?.message || '测试邮件已发送')
+  } catch (e: any) {
+    say(e.response?.data?.detail || '发送失败', false)
+  }
+  testBusy.value = false
+}
+
+async function removeStudent() {
+  if (!confirm(`删除 ${student.value?.name || props.id} 的档案？成绩记录会一并删除，且无法恢复。`)) return
+  try {
+    await deleteStudent(props.id)
+    router.push('/')
+  } catch (e: any) {
+    say(e.response?.data?.detail || '删除失败', false)
+  }
+}
 
 const tab = ref<'grades' | 'timetable'>('grades')
 
@@ -67,6 +130,7 @@ async function load() {
     student.value = s
     grades.value = g
     gpaSummary.value = summary
+    emailInput.value = s.email || ''
   } catch (e) {
     if (gen !== _reqGen) return
     console.error(e)
@@ -116,17 +180,41 @@ watch(() => props.id, () => { load() })
       <div v-else-if="!student" class="state"><p>无法加载学生信息</p></div>
 
       <template v-else-if="student">
-        <!-- Info bar -->
-        <div class="info-bar">
-          <span>{{ student.name || student.student_id }}</span>
-          <span class="info-sep">·</span>
-          <span>{{ student.student_id }}</span>
-          <span class="info-sep">·</span>
-          <span v-if="student.major">{{ student.major }}</span>
-          <span class="info-sep" v-if="student.grade">·</span>
-          <span v-if="student.grade">{{ student.grade }}级</span>
-          <button class="btn-print" @click="doPrint">打印</button>
-        </div>
+        <!-- 档案头：印章沿用名册那一枚，点进来是同一个人 -->
+        <header class="profile">
+          <span class="seal" :class="{ long: seal.length > 2 }" aria-hidden="true">{{ seal }}</span>
+
+          <div class="who">
+            <h1>{{ student.name || student.student_id }}</h1>
+            <p class="line">
+              <span class="sid">{{ student.student_id }}</span>
+              <template v-if="student.major"> · {{ student.major }}</template>
+              <template v-if="student.grade"> · <span class="yr">{{ student.grade }}</span> 级</template>
+            </p>
+          </div>
+
+          <div class="ops">
+            <label class="switch" :class="{ on: student.is_monitored, busy: monitorBusy }">
+              <input type="checkbox" :checked="student.is_monitored"
+                     :disabled="monitorBusy" @change="toggleMonitor" />
+              <span class="track" aria-hidden="true"></span>
+              <span class="switch-label">{{ student.is_monitored ? '监控中' : '未监控' }}</span>
+            </label>
+            <button class="btn-quiet" @click="doPrint">打印</button>
+            <button class="btn-quiet danger" @click="removeStudent">删除档案</button>
+          </div>
+
+          <div class="mail">
+            <label for="mail">通知邮箱</label>
+            <input id="mail" v-model="emailInput" type="email" placeholder="留空则不发通知"
+                   :disabled="emailBusy" @change="saveEmail" />
+            <button class="btn-quiet" :disabled="testBusy || !student.email" @click="sendTest">
+              {{ testBusy ? '发送中' : '发测试邮件' }}
+            </button>
+          </div>
+
+          <p v-if="notice" class="notice" :class="{ ok: notice.ok }">{{ notice.text }}</p>
+        </header>
 
         <!-- Tabs -->
         <div class="tabs">
@@ -265,9 +353,134 @@ watch(() => props.id, () => { load() })
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* Info bar */
-.info-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: var(--white); border-radius: var(--radius-md); padding: 10px 18px; margin-bottom: 16px; font-size: 13px; color: var(--ink-600); box-shadow: var(--shadow-sm); }
-.info-sep { color: var(--ink-200); }
-.btn-print { margin-left: auto; background: var(--ink-900); color: #fff; padding: 4px 12px; border-radius: var(--radius-sm); font-size: 12px; }
+/* ── 档案头 ── */
+.profile {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas:
+    'seal who  ops'
+    'seal mail mail'
+    'note note note';
+  align-items: center;
+  column-gap: 16px;
+  row-gap: 12px;
+  background: var(--white);
+  border: 1px solid var(--ink-100);
+  border-radius: var(--radius-md);
+  padding: 18px 20px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow-sm);
+}
+
+/* 与名册同一枚印 —— 点进来还是这个人 */
+.seal {
+  grid-area: seal;
+  align-self: start;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 3px;
+  background: var(--cinnabar);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-indent: 0.08em;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+  flex-shrink: 0;
+}
+.seal.long { font-size: 13px; letter-spacing: 0.02em; text-indent: 0.02em; }
+
+.who { grid-area: who; min-width: 0; }
+.who h1 { font-size: 19px; font-weight: 600; color: var(--ink-900); line-height: 1.3; }
+.line { font-size: 12.5px; color: var(--ink-300); margin-top: 2px; }
+.sid, .yr { font-family: var(--font-data); }
+
+/* 操作 */
+.ops { grid-area: ops; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+
+.switch { display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+.switch.busy { cursor: progress; opacity: 0.6; }
+.switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.track {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--ink-200);
+  transition: background var(--transition);
+  flex-shrink: 0;
+}
+.track::before {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  top: 2px;
+  left: 2px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform var(--transition);
+}
+.switch.on .track { background: var(--jade); }
+.switch.on .track::before { transform: translateX(16px); }
+.switch input:focus-visible + .track { outline: 2px solid var(--cinnabar); outline-offset: 2px; }
+.switch-label { font-size: 13px; font-weight: 500; color: var(--ink-300); }
+.switch.on .switch-label { color: var(--jade); }
+
+.btn-quiet {
+  padding: 5px 12px;
+  background: var(--white);
+  border: 1px solid var(--ink-100);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  font-family: inherit;
+  color: var(--ink-600);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color var(--transition), color var(--transition), background var(--transition);
+}
+.btn-quiet:hover:not(:disabled) { border-color: var(--ink-200); color: var(--ink-900); }
+.btn-quiet:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-quiet.danger:hover { border-color: var(--cinnabar); color: var(--cinnabar); background: var(--cinnabar-light); }
+
+/* 邮箱 */
+.mail {
+  grid-area: mail;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--paper-dim);
+}
+.mail label { font-size: 12px; color: var(--ink-300); flex-shrink: 0; }
+.mail input {
+  flex: 1;
+  max-width: 280px;
+  padding: 5px 10px;
+  border: 1px solid var(--ink-100);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  font-family: inherit;
+  color: var(--ink-900);
+  outline: none;
+  transition: border-color var(--transition);
+}
+.mail input:focus { border-color: var(--ink-600); }
+
+.notice { grid-area: note; font-size: 12.5px; color: var(--cinnabar); }
+.notice.ok { color: var(--jade); }
+
+@media (prefers-reduced-motion: reduce) {
+  .track, .track::before, .btn-quiet { transition: none; }
+}
+@media (max-width: 700px) {
+  .profile { grid-template-columns: auto 1fr; grid-template-areas: 'seal who' 'ops ops' 'mail mail' 'note note'; }
+  .ops { justify-content: flex-start; }
+  .mail { flex-wrap: wrap; }
+}
 
 /* GPA Card */
 .gpa-card { background: var(--white); border-radius: var(--radius-lg); box-shadow: var(--shadow-md); margin-bottom: 16px; overflow: hidden; }

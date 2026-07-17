@@ -1,246 +1,153 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import type { Student } from '../types'
 
 const props = defineProps<{ student: Student }>()
-const emit = defineEmits<{ toggleMonitor: []; delete: []; testEmail: [] }>()
 const router = useRouter()
 
-function formatTime(t: string | null) {
-  if (!t) return '暂无记录'
-  const d = new Date(t)
-  const now = new Date()
-  const diff = now.getTime() - d.getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return '刚刚'
-  if (mins < 60) return `${mins}分钟前`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}小时前`
-  const days = Math.floor(hours / 24)
-  if (days < 7) return `${days}天前`
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+// 首页只负责认人。监控开关/邮件/删除都在学生详情页。
+const seal = computed(() => (props.student.name || props.student.student_id).slice(0, 3))
+const displayName = computed(() => props.student.name || props.student.student_id)
+
+function open() {
+  router.push(`/student/${props.student.student_id}`)
 }
 </script>
 
 <template>
-  <article class="card" :class="{ monitored: student.is_monitored }">
-    <div class="card-accent"></div>
+  <button class="card" type="button" @click="open" :aria-label="`打开 ${displayName} 的档案`">
+    <span class="seal" :class="{ long: seal.length > 2 }" aria-hidden="true">{{ seal }}</span>
 
-    <div class="card-header">
-      <div class="card-identity" @click="router.push(`/student/${student.student_id}`)">
-        <h3>{{ student.name || student.student_id }}</h3>
-        <span class="sid">{{ student.student_id }}</span>
-      </div>
+    <span class="identity">
+      <span class="name">{{ displayName }}</span>
+      <span class="sid">{{ student.student_id }}</span>
+    </span>
 
-      <div class="card-actions">
-        <button v-if="student.email" class="btn-test-email" @click.stop="emit('testEmail')" title="发送测试邮件">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></svg>
-        </button>
-        <label class="toggle-switch" :title="student.is_monitored ? '取消监控' : '加入监控'">
-          <input
-            type="checkbox"
-            :checked="student.is_monitored"
-            @change="emit('toggleMonitor')"
-          />
-          <span class="toggle-slider"></span>
-        </label>
-        <button class="btn-delete" @click.stop="emit('delete')" title="删除">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-        </button>
-      </div>
-    </div>
+    <span class="meta">
+      <span v-if="student.major" class="major">{{ student.major }}</span>
+      <span v-if="student.grade" class="year">{{ student.grade }} 级</span>
+    </span>
 
-    <div class="card-body" @click="router.push(`/student/${student.student_id}`)">
-      <div class="stat-col">
-        <span class="stat-num">{{ student.grade_count }}</span>
-        <span class="stat-label">门成绩</span>
-      </div>
-      <div class="meta-col">
-        <div class="meta-row">
-          <span class="meta-label">最近变动</span>
-          <span class="meta-value">{{ formatTime(student.last_change_at) }}</span>
-        </div>
-        <div class="meta-row" v-if="student.email">
-          <span class="meta-label">通知邮箱</span>
-          <span class="meta-value" style="font-size:11px">{{ student.email }}</span>
-        </div>
-        <div class="meta-row" v-if="student.is_monitored">
-          <span class="meta-label">监控状态</span>
-          <span class="meta-value monitoring-on">监控中</span>
-        </div>
-        <div class="meta-row" v-else>
-          <span class="meta-label">监控状态</span>
-          <span class="meta-value monitoring-off">未监控</span>
-        </div>
-      </div>
-    </div>
-  </article>
+    <span class="foot">
+      <span class="count"><b>{{ student.grade_count }}</b> 门成绩</span>
+      <span class="go" aria-hidden="true">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+      </span>
+    </span>
+  </button>
 </template>
 
 <style scoped>
 .card {
-  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas:
+    'seal identity'
+    'seal meta'
+    'foot foot';
+  align-items: start;
+  column-gap: 16px;
+  row-gap: 4px;
+  width: 100%;
+  padding: 20px;
+  text-align: left;
   background: var(--white);
+  border: 1px solid var(--ink-100);
   border-radius: var(--radius-md);
-  overflow: hidden;
-  box-shadow: var(--shadow-sm);
-  transition: all var(--transition);
-  border: 1px solid transparent;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color var(--transition), box-shadow var(--transition),
+              transform var(--transition);
 }
 .card:hover {
+  border-color: var(--ink-200);
   box-shadow: var(--shadow-md);
   transform: translateY(-2px);
 }
-.card.monitored {
-  border-color: var(--jade-light);
-}
-.card-accent {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: var(--ink-200);
-  transition: background var(--transition);
-}
-.card.monitored .card-accent {
-  background: var(--jade);
+.card:focus-visible {
+  outline: 2px solid var(--cinnabar);
+  outline-offset: 2px;
 }
 
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  padding: 20px 20px 0;
-}
-.card-identity {
-  cursor: pointer;
-  flex: 1;
-  min-width: 0;
-}
-.card-identity h3 {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--ink-900);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.sid {
-  font-size: 12px;
-  color: var(--ink-300);
-  margin-top: 2px;
-  display: block;
-}
-
-.card-actions {
+/* 朱砂印 —— 中文文书用印章标识"这是谁的"，正是这一页的职责 */
+.seal {
+  grid-area: seal;
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 3px;
+  background: var(--cinnabar);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-indent: 0.08em;          /* 抵消末字右侧字距，视觉居中 */
+  /* 内圈细框，模仿印章的边阑 */
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
   flex-shrink: 0;
 }
+.seal.long { font-size: 13px; letter-spacing: 0.02em; text-indent: 0.02em; }
 
-/* Toggle Switch */
-.toggle-switch {
-  position: relative;
-  display: inline-block;
-  width: 40px;
-  height: 22px;
-  cursor: pointer;
+.identity { grid-area: identity; display: flex; flex-direction: column; gap: 2px; }
+.name {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink-900);
+  line-height: 1.3;
 }
-.toggle-switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-.toggle-slider {
-  position: absolute;
-  inset: 0;
-  background: var(--ink-200);
-  border-radius: 11px;
-  transition: background var(--transition);
-}
-.toggle-slider::before {
-  content: '';
-  position: absolute;
-  width: 18px;
-  height: 18px;
-  left: 2px;
-  bottom: 2px;
-  background: #fff;
-  border-radius: 50%;
-  transition: transform var(--transition);
-}
-.toggle-switch input:checked + .toggle-slider {
-  background: var(--jade);
-}
-.toggle-switch input:checked + .toggle-slider::before {
-  transform: translateX(18px);
-}
-
-.btn-delete {
-  background: none;
-  color: var(--ink-200);
-  padding: 4px;
-  border-radius: var(--radius-sm);
-}
-.btn-delete:hover {
-  color: var(--cinnabar);
-  background: var(--cinnabar-light);
-}
-.btn-test-email {
-  background: none;
-  color: var(--ink-300);
-  padding: 4px;
-  border-radius: var(--radius-sm);
-}
-.btn-test-email:hover {
-  color: var(--jade);
-  background: var(--jade-light);
-}
-
-.card-body {
-  display: flex;
-  gap: 28px;
-  padding: 16px 20px 20px;
-  cursor: pointer;
-}
-.stat-col {
-  text-align: center;
-  flex-shrink: 0;
-}
-.stat-num {
-  font-size: 34px;
-  font-weight: 700;
-  color: var(--ink-800);
-  display: block;
-  line-height: 1;
-}
-.stat-label {
+.sid {
+  font-family: var(--font-data);
   font-size: 12px;
   color: var(--ink-300);
-  margin-top: 4px;
-  display: block;
+  letter-spacing: 0.02em;
 }
-.meta-col {
-  flex: 1;
+
+.meta {
+  grid-area: meta;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  justify-content: center;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--ink-600);
 }
-.meta-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 13px;
-}
-.meta-label {
+.year {
+  font-family: var(--font-data);
   color: var(--ink-300);
 }
-.meta-value {
-  color: var(--ink-600);
-  font-weight: 500;
+.major + .year::before {
+  content: '·';
+  margin-right: 8px;
+  color: var(--ink-200);
 }
-.monitoring-on { color: var(--jade); }
-.monitoring-off { color: var(--ink-300); }
+
+.foot {
+  grid-area: foot;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--paper-dim);
+  font-size: 12.5px;
+  color: var(--ink-300);
+}
+.count b {
+  font-family: var(--font-data);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink-800);
+  margin-right: 3px;
+}
+.go { color: var(--ink-200); display: flex; transition: color var(--transition), transform var(--transition); }
+.card:hover .go { color: var(--cinnabar); transform: translateX(2px); }
+
+@media (prefers-reduced-motion: reduce) {
+  .card, .go { transition: none; }
+  .card:hover { transform: none; }
+  .card:hover .go { transform: none; }
+}
 </style>
