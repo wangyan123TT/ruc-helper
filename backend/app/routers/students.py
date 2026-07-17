@@ -123,7 +123,7 @@ def toggle_monitor(student_id: str, db: Session = Depends(get_db)):
 
 @router.post("/{student_id}/test-email", response_model=MessageResponse)
 def test_email(student_id: str, db: Session = Depends(get_db)):
-    """完整测试：随机删一门成绩 → 调用监控轮询（登录+拉取+比对+发邮件）"""
+    """完整测试：随机删1~3门成绩 → 调用监控轮询（登录+拉取+比对+发邮件）"""
     import random
     from ..services.grade import EMAIL_CONFIG
     from ..services.monitor import poll_student_sync
@@ -137,50 +137,53 @@ def test_email(student_id: str, db: Session = Depends(get_db)):
     if not EMAIL_CONFIG.get("smtpUsername"):
         raise HTTPException(400, "SMTP 未配置，请先在设置中配置发件邮箱")
 
-    # 1. 检查是否有成绩数据
     existing = db.query(Grade).filter(Grade.student_id == student_id).all()
     if not existing:
         raise HTTPException(400, "测试失败：无可用成绩数据，请先刷新成绩")
 
-    # 2. 保存要删除的数据，然后删除
-    target = random.choice(existing)
-    deleted_name = target.course_name
-    saved_data = {c.name: getattr(target, c.name) for c in target.__table__.columns}
-    db.delete(target)
+    # 随机选 1~3 门，不超过实际数量
+    count = min(random.randint(1, 3), len(existing))
+    targets = random.sample(existing, count)
+    deleted_names = [t.course_name for t in targets]
+    saved_list = [{c.name: getattr(t, c.name) for c in t.__table__.columns} for t in targets]
+
+    for t in targets:
+        db.delete(t)
     db.commit()
 
-    def _restore():
-        """恢复被删成绩（幂等：已存在则跳过）"""
-        try:
-            exists = db.query(Grade).filter(
-                Grade.student_id == student_id,
-                Grade.cjgl016id == saved_data["cjgl016id"]
-            ).first()
-            if not exists:
-                restore = Grade(**{k: v for k, v in saved_data.items() if k != 'id'})
-                db.add(restore)
-                db.commit()
-                return True
-        except Exception as e:
-            db.rollback()
-            print(f"[test-email] 恢复失败: {e}")
-        return False
+    def _restore_all():
+        restored = 0
+        for saved in saved_list:
+            try:
+                exists = db.query(Grade).filter(
+                    Grade.student_id == student_id,
+                    Grade.cjgl016id == saved["cjgl016id"]
+                ).first()
+                if not exists:
+                    db.add(Grade(**{k: v for k, v in saved.items() if k != 'id'}))
+                    db.commit()
+                    restored += 1
+            except Exception as e:
+                db.rollback()
+                print(f"[test-email] 恢复失败: {e}")
+        return restored
 
     try:
         result = poll_student_sync(db, s)
         if not result["ok"] or result["new"] == 0:
-            _restore()
+            _restore_all()
             err = result["error"] or "未检测到新增"
-            raise HTTPException(500, f"测试失败：{err}（{'已恢复' if _restore() else '恢复失败，请手动检查'}「{deleted_name}」）")
+            raise HTTPException(500, f"测试失败：{err}（已尝试恢复 {count} 门）")
 
+        _restore_all()
         return MessageResponse(
-            message=f"测试通过！临时删除「{deleted_name}」→ 检测到新增 {result['new']} 门 → 邮件已发送至 {s.email}"
+            message=f"测试通过！临时删除 {count} 门（{', '.join(deleted_names)}）→ 检测到新增 {result['new']} 门 → 邮件已发送至 {s.email}"
         )
     except HTTPException:
         raise
     except Exception as e:
-        restored = _restore()
-        raise HTTPException(500, f"测试失败：{e}（{'已恢复' if restored else '恢复失败，请手动检查'}「{deleted_name}」）")
+        _restore_all()
+        raise HTTPException(500, f"测试失败：{e}（已尝试恢复 {count} 门：{', '.join(deleted_names)}）")
 
 
 @router.put("/{student_id}/email", response_model=StudentResponse)

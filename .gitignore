@@ -28,9 +28,12 @@ frontend/dist/
 # 数据文件
 data/
 
-# 截图 / 临时文件
-course-page.png
+# Playwright
 .playwright-mcp/
+.playwright-cli/
+
+# Nginx basic auth
+nginx-auth/
 
 # OS
 .DS_Store
