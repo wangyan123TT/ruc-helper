@@ -35,3 +35,10 @@ course-page.png
 # OS
 .DS_Store
 Thumbs.db
+
+# 课程表输出 (含姓名/学号)
+timetable.html
+
+# nginx 基础认证密码文件
+nginx-auth/
+nginx-auth.zip

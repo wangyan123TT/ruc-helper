@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import init_db
-from .routers import students, grades, monitor, settings
+from .routers import students, grades, monitor, settings, timetable
 
 
 @asynccontextmanager
@@ -29,6 +29,7 @@ app.include_router(students.router)
 app.include_router(grades.router)
 app.include_router(monitor.router)
 app.include_router(settings.router)
+app.include_router(timetable.router)
 
 
 @app.get("/api/health")

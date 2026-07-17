@@ -66,3 +66,76 @@ export interface MonitorHistoryItem {
   grade_ids: string[]
   sent_at: string
 }
+
+// ---- 预选课程表（待筛选志愿）----
+
+export interface TimetableSlot {
+  weeks: string
+  day: number
+  periods: number[]
+  room: string
+  start: string
+  end: string
+  campus: string
+  building: string
+}
+
+export interface TimetableClass {
+  pref: number
+  class_name: string
+  teacher: string
+  slots: TimetableSlot[]
+  /** 该备选班与第一志愿上课时间不同 —— 课表上画虚线"备选落点" */
+  is_ghost: boolean
+}
+
+export interface TimetableCourse {
+  name: string
+  category: string
+  cat_class: string
+  credit: number
+  dept: string
+  /** 该门课报了几个志愿（平行班） */
+  n_pref: number
+  /** 各志愿上课时间是否一致 */
+  same_time: boolean
+  primary: TimetableClass
+  alts: TimetableClass[]
+}
+
+export interface TimetablePeriod {
+  name: string
+  start: string
+  end: string
+  subs: number[]
+}
+
+export interface TimetableContext {
+  name: string
+  sid: string
+  major: string
+  hd_name: string
+  xnxq: string
+  mode: string
+  ctrl: string
+  xkkssj: string
+  xkjssj: string
+  now: string
+  periods: TimetablePeriod[]
+}
+
+export interface TimetableConflict {
+  day: number
+  period: number
+  names: string[]
+}
+
+export interface TimetableData {
+  context: TimetableContext
+  courses: TimetableCourse[]
+  conflicts: TimetableConflict[]
+  total_credit: number
+  n_courses: number
+  n_prefs: number
+  nopass_count: number
+}

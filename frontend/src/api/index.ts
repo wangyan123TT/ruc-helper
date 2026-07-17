@@ -6,6 +6,7 @@ import type {
   GradeRefreshResult,
   MonitorStatus,
   MonitorHistoryItem,
+  TimetableData,
 } from '../types'
 
 const api = axios.create({ baseURL: '/api' })
@@ -55,3 +56,7 @@ export const stopMonitor = () =>
 
 export const getMonitorHistory = () =>
   api.get<MonitorHistoryItem[]>('/monitor/history').then(r => r.data)
+
+// Timetable — 预选课程表（待筛选志愿）。实时抓取，不入库。
+export const getTimetable = (studentId: string) =>
+  api.get<TimetableData>(`/timetable/${studentId}`).then(r => r.data)
