@@ -2,8 +2,10 @@ services:
   backend:
     build: ./backend
     container_name: ruc-backend
+    # 只绑本机。nginx 走 docker 内网 proxy_pass 到 backend:8000，不需要对外映射；
+    # 若绑 0.0.0.0，任何人都能直连 8000 绕过 nginx 的 auth_basic 拿到全部学生数据。
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - db_data:/app/data
       - ./backend/app:/app/app
