@@ -46,7 +46,7 @@ async function submit() {
         <label>学号</label>
         <input
           v-model="studentId"
-          placeholder="例如：2025202002"
+          placeholder="10 位学号"
           @keyup.enter="submit"
           autofocus
         />

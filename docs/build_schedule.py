@@ -1,26 +1,59 @@
-"""全校课程表 + 教师课表时间合并 → Excel（一门课一行）"""
-import requests, json, sys
+"""
+全校课程表 + 教师课表时间合并 → Excel（一门课一行）
+
+凭据从项目根 .env 读取 (RUC_STUDENT_ID / RUC_PASSWORD)，.env 已 gitignore。
+不要把学号密码写死在这个文件里 —— 它会进 git，而 git 历史是永久的、公开的。
+"""
+import os, sys, json
+import requests
 from collections import defaultdict
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 sys.stdout.reconfigure(encoding="utf-8")
 
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def load_creds():
+    env = {}
+    path = os.path.join(ROOT, ".env")
+    if os.path.exists(path):
+        for line in open(path, encoding="utf-8"):
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                env[k.strip()] = v.strip().strip('"').strip("'")
+    sid = env.get("RUC_STUDENT_ID") or os.getenv("RUC_STUDENT_ID")
+    pwd = env.get("RUC_PASSWORD") or os.getenv("RUC_PASSWORD")
+    if not sid or not pwd:
+        import getpass
+        print("[.env 未配置 RUC_STUDENT_ID / RUC_PASSWORD，手动输入 — 密码不回显]")
+        sid = sid or input("学号: ").strip()
+        pwd = pwd or getpass.getpass("密码: ")
+    return sid, pwd
+
+
 # ── Login ──
+STU_ID, STU_PWD = load_creds()
 resp = requests.post("https://jw.ruc.edu.cn/secService/login", json={
-    "userCode": "2025202002", "password": "Wcx44773873",
+    "userCode": STU_ID, "password": STU_PWD,
     "kaptcha": "testa", "userCodeType": "ldap"
 }, headers={
     "Content-Type": "application/json", "Accept": "application/json",
     "KAPTCHA-KEY-GENERATOR-REDIS": "securityKaptchaRedisServiceAdapter",
 }, timeout=15)
-token = resp.json()["data"]["token"]
+del STU_PWD
+data = resp.json()
+if data.get("errorCode") != "success":
+    sys.exit(f"登录失败: {data.get('errorMessage') or '学号或密码错误'}")
+token = data["data"]["token"]
 session = resp.cookies.get("SESSION")
 H = {
     "Content-Type": "application/json;charset=UTF-8",
     "Accept": "application/json, text/plain, */*",
     "token": token, "app": "PCWEB", "userrolecode": "student",
-    "Cookie": f"authcode=2025202002; SESSION={session}; token=",
+    "Cookie": f"authcode={STU_ID}; SESSION={session}; token=",
     "Referer": "https://jw.ruc.edu.cn/Njw2017/index.html",
 }
 BASE = "https://jw.ruc.edu.cn/resService/jwxtpt/v1"
