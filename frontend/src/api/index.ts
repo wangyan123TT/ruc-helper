@@ -16,6 +16,38 @@ import type {
 
 const api = axios.create({ baseURL: '/api' })
 
+// ---- 登录会话 ----
+const TOKEN_KEY = 'ruc_session_token'
+export const getToken = () => localStorage.getItem(TOKEN_KEY) || ''
+export const setToken = (t: string) => localStorage.setItem(TOKEN_KEY, t)
+export const clearToken = () => localStorage.removeItem(TOKEN_KEY)
+
+// 每次请求带上令牌
+api.interceptors.request.use(cfg => {
+  const t = getToken()
+  if (t) cfg.headers['X-Session-Token'] = t
+  return cfg
+})
+
+// 401 = 登录失效 -> 清令牌回登录页
+api.interceptors.response.use(
+  r => r,
+  err => {
+    if (err.response?.status === 401) {
+      clearToken()
+      if (location.pathname !== '/login') location.href = '/login'
+    }
+    return Promise.reject(err)
+  },
+)
+
+export interface LoginResp { token: string; student_id: string; name: string; expires_hours: number }
+export const login = (student_id: string, password: string) =>
+  api.post<LoginResp>('/auth/login', { student_id, password }).then(r => r.data)
+export const logout = () => api.post('/auth/logout').then(r => r.data).catch(() => {})
+export const getMe = () =>
+  api.get<{ student_id: string; name: string; major: string; grade: string }>('/auth/me').then(r => r.data)
+
 // Students
 export const addStudent = (data: StudentCreate) =>
   api.post<Student>('/students/', data).then(r => r.data)

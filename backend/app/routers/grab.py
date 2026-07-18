@@ -16,6 +16,7 @@ from ..models import GrabTarget, Student, now
 from ..services.auth import decrypt_password
 from ..services import grab as grab_svc
 from ..services import xk
+from ..services.session import require_owner, require_session
 
 router = APIRouter(prefix="/api/grab", tags=["grab"])
 
@@ -71,7 +72,7 @@ def _student_or_404(db, student_id):
 
 
 # ---------- 浏览课程池（供前端选目标） ----------
-@router.get("/{student_id}/categories")
+@router.get("/{student_id}/categories", dependencies=[Depends(require_owner)])
 def categories(student_id: str, db: Session = Depends(get_db)):
     """课程类别列表 + 选课模式信息"""
     s = _student_or_404(db, student_id)
@@ -84,7 +85,7 @@ def categories(student_id: str, db: Session = Depends(get_db)):
     }
 
 
-@router.get("/{student_id}/pool")
+@router.get("/{student_id}/pool", dependencies=[Depends(require_owner)])
 def pool(student_id: str, kclbcode: str,
          xxklbcode: str = "", honerItemId: str = "", kkdwid: str = "", isSxrz: str = "",
          db: Session = Depends(get_db)):
@@ -114,7 +115,7 @@ def pool(student_id: str, kclbcode: str,
 
 
 # ---------- 目标管理 ----------
-@router.get("/{student_id}/targets")
+@router.get("/{student_id}/targets", dependencies=[Depends(require_owner)])
 def list_targets(student_id: str, db: Session = Depends(get_db)):
     _student_or_404(db, student_id)
     ts = db.query(GrabTarget).filter(GrabTarget.student_id == student_id)\
@@ -122,7 +123,7 @@ def list_targets(student_id: str, db: Session = Depends(get_db)):
     return [_target_out(t) for t in ts]
 
 
-@router.post("/{student_id}/targets")
+@router.post("/{student_id}/targets", dependencies=[Depends(require_owner)])
 def add_target(student_id: str, body: AddTarget, db: Session = Depends(get_db)):
     _student_or_404(db, student_id)
     exists = db.query(GrabTarget).filter(
@@ -143,7 +144,7 @@ def add_target(student_id: str, body: AddTarget, db: Session = Depends(get_db)):
     return _target_out(t)
 
 
-@router.delete("/{student_id}/targets/{target_id}")
+@router.delete("/{student_id}/targets/{target_id}", dependencies=[Depends(require_owner)])
 def remove_target(student_id: str, target_id: int, db: Session = Depends(get_db)):
     t = db.query(GrabTarget).filter(
         GrabTarget.id == target_id, GrabTarget.student_id == student_id).first()
@@ -155,7 +156,7 @@ def remove_target(student_id: str, target_id: int, db: Session = Depends(get_db)
 
 
 # ---------- 全局状态 ----------
-@router.get("/status")
+@router.get("/status", dependencies=[Depends(require_session)])
 def status(db: Session = Depends(get_db)):
     total = db.query(GrabTarget).count()
     by = {}

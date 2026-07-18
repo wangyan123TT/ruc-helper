@@ -93,6 +93,16 @@ class Setting(Base):
     value = Column(Text, default="")
 
 
+class Session(Base):
+    """登录会话 —— 令牌到学号的映射。存 DB 所以服务重启不掉线。"""
+    __tablename__ = "sessions"
+
+    token = Column(String(64), primary_key=True)
+    student_id = Column(String(20), nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=now)
+
+
 class GrabTarget(Base):
     """抢课目标 —— 某学生想抢的某门课（的某个班）。
 

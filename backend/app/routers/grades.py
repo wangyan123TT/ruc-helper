@@ -6,12 +6,14 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import Student, Grade
+from ..services.session import require_owner
 from ..schemas import GradeResponse, GradeRefreshResult, GpaSummary
 from ..services.grade import (
     fetch_grades_from_api, fetch_ranking, sync_grades, _grade_to_response,
 )
 
-router = APIRouter(prefix="/api/grades", tags=["grades"])
+router = APIRouter(prefix="/api/grades", tags=["grades"],
+                   dependencies=[Depends(require_owner)])   # 只能查自己学号
 
 
 @router.get("/{student_id}", response_model=list[GradeResponse])

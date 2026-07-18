@@ -8,8 +8,10 @@ from ..database import get_db
 from ..models import Student, NotificationLog, MonitorLog
 from ..schemas import MonitorStatus, MonitorHistoryItem, MessageResponse
 from ..services.monitor import start_monitor, stop_monitor, is_running, get_poll_interval, set_poll_interval, set_heartbeat_email, get_heartbeat_email
+from ..services.session import require_admin
 
-router = APIRouter(prefix="/api/monitor", tags=["monitor"])
+router = APIRouter(prefix="/api/monitor", tags=["monitor"],
+                   dependencies=[Depends(require_admin)])   # 管理员专用
 
 
 @router.get("/status", response_model=MonitorStatus)

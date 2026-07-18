@@ -3,17 +3,18 @@ import { ref, onMounted, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   getStudent, getGrades, refreshGrades, reloginStudent, getGpaSummary,
-  getTimetable, getEnrolledTimetable,
-  toggleMonitorStudent, testEmailStudent, updateStudentEmail, deleteStudent,
+  getTimetable, getEnrolledTimetable, getMe, logout, clearToken,
 } from '../api'
 import type { Student, GradeItem, GradeRefreshResult, GpaSummary, TimetableData } from '../types'
 import GradeTable from '../components/GradeTable.vue'
 import TimetableGrid from '../components/TimetableGrid.vue'
 import GrabPanel from '../components/GrabPanel.vue'
 
-const props = defineProps<{ id: string }>()
+// self=true 时从 /me 解析自己的学号；否则用路由传入的 id（已基本弃用）
+const props = defineProps<{ id?: string; self?: boolean }>()
 const router = useRouter()
 
+const sid = ref(props.id || '')
 const student = ref<Student | null>(null)
 const grades = ref<GradeItem[]>([])
 const loading = ref(true)
@@ -22,64 +23,13 @@ const result = ref<GradeRefreshResult | null>(null)
 const gpaSummary = ref<GpaSummary | null>(null)
 let _reqGen = 0
 
-// ── 档案操作（从首页搬下来：首页只管认人，操作在各自档案里）──
-const monitorBusy = ref(false)
-const emailInput = ref('')
-const emailBusy = ref(false)
-const testBusy = ref(false)
-const notice = ref<{ text: string; ok: boolean } | null>(null)
-
 const seal = computed(() =>
   (student.value?.name || student.value?.student_id || '').slice(0, 3))
 
-function say(text: string, ok = true) {
-  notice.value = { text, ok }
-  setTimeout(() => { notice.value = null }, 4000)
-}
-
-async function toggleMonitor() {
-  if (!student.value) return
-  monitorBusy.value = true
-  try {
-    student.value = await toggleMonitorStudent(props.id)
-    say(student.value.is_monitored ? '已加入监控' : '已移出监控')
-  } catch (e: any) {
-    say(e.response?.data?.detail || '操作失败', false)
-  }
-  monitorBusy.value = false
-}
-
-async function saveEmail() {
-  if (!student.value || emailInput.value === student.value.email) return
-  emailBusy.value = true
-  try {
-    student.value = await updateStudentEmail(props.id, emailInput.value)
-    say(emailInput.value ? '通知邮箱已更新' : '已清空通知邮箱')
-  } catch (e: any) {
-    say(e.response?.data?.detail || '保存失败', false)
-  }
-  emailBusy.value = false
-}
-
-async function sendTest() {
-  testBusy.value = true
-  try {
-    const r = await testEmailStudent(props.id) as any
-    say(r?.message || '测试邮件已发送')
-  } catch (e: any) {
-    say(e.response?.data?.detail || '发送失败', false)
-  }
-  testBusy.value = false
-}
-
-async function removeStudent() {
-  if (!confirm(`删除 ${student.value?.name || props.id} 的档案？成绩记录会一并删除，且无法恢复。`)) return
-  try {
-    await deleteStudent(props.id)
-    router.push('/')
-  } catch (e: any) {
-    say(e.response?.data?.detail || '删除失败', false)
-  }
+async function doLogout() {
+  await logout()
+  clearToken()
+  router.replace('/login')
 }
 
 type Tab = 'grades' | 'timetable' | 'enrolled' | 'grab'
@@ -103,7 +53,7 @@ async function loadTimetable(force = false) {
   ttLoading.value = true
   ttError.value = ''
   try {
-    const d = await getTimetable(props.id)
+    const d = await getTimetable(sid.value)
     if (gen !== _ttGen) return
     timetable.value = d
   } catch (e: any) {
@@ -122,7 +72,7 @@ async function loadEnrolled(force = false) {
   enLoading.value = true
   enError.value = ''
   try {
-    const d = await getEnrolledTimetable(props.id)
+    const d = await getEnrolledTimetable(sid.value)
     if (gen !== _enGen) return
     enrolled.value = d
   } catch (e: any) {
@@ -152,15 +102,15 @@ async function load() {
   enError.value = ''
   tab.value = 'grades'
   try {
+    if (props.self && !sid.value) sid.value = (await getMe()).student_id
     const [s, g, summary] = await Promise.all([
-      getStudent(props.id), getGrades(props.id),
-      getGpaSummary(props.id).catch(() => null)
+      getStudent(sid.value), getGrades(sid.value),
+      getGpaSummary(sid.value).catch(() => null)
     ])
     if (gen !== _reqGen) return
     student.value = s
     grades.value = g
     gpaSummary.value = summary
-    emailInput.value = s.email || ''
   } catch (e) {
     if (gen !== _reqGen) return
     console.error(e)
@@ -174,14 +124,14 @@ async function _doRefresh() {
   const gen = ++_reqGen
   refreshing.value = true; result.value = null
   try {
-    const r = await refreshGrades(props.id)
+    const r = await refreshGrades(sid.value)
     if (gen !== _reqGen) return
     result.value = r
-    grades.value = await getGrades(props.id)
+    grades.value = await getGrades(sid.value)
   } catch (e: any) {
     if (gen !== _reqGen) return
     if (e.response?.status === 502 && _retryLeft > 0) {
-      _retryLeft--; try { await reloginStudent(props.id) } catch (_) {}
+      _retryLeft--; try { await reloginStudent(sid.value) } catch (_) {}
       await _doRefresh(); return
     }
     alert('刷新失败: ' + (e.response?.data?.detail || e.message))
@@ -190,18 +140,18 @@ async function _doRefresh() {
 
 function doPrint() { window.print() }
 onMounted(load)
-watch(() => props.id, () => { load() })
+watch(() => props.id, () => { sid.value = props.id || sid.value; load() })
 </script>
 
 <template>
   <div class="detail-page">
     <header class="topbar">
       <div class="topbar-inner">
-        <button class="btn-back" @click="router.push('/')">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
-          返回
+        <span class="brand">微人大选课助手</span>
+        <button class="btn-back" @click="doLogout">
+          退出登录
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
         </button>
-        <span class="brand">RUC Helper</span>
       </div>
     </header>
 
@@ -224,26 +174,8 @@ watch(() => props.id, () => { load() })
           </div>
 
           <div class="ops">
-            <label class="switch" :class="{ on: student.is_monitored, busy: monitorBusy }">
-              <input type="checkbox" :checked="student.is_monitored"
-                     :disabled="monitorBusy" @change="toggleMonitor" />
-              <span class="track" aria-hidden="true"></span>
-              <span class="switch-label">{{ student.is_monitored ? '监控中' : '未监控' }}</span>
-            </label>
             <button class="btn-quiet" @click="doPrint">打印</button>
-            <button class="btn-quiet danger" @click="removeStudent">删除档案</button>
           </div>
-
-          <div class="mail">
-            <label for="mail">通知邮箱</label>
-            <input id="mail" v-model="emailInput" type="email" placeholder="留空则不发通知"
-                   :disabled="emailBusy" @change="saveEmail" />
-            <button class="btn-quiet" :disabled="testBusy || !student.email" @click="sendTest">
-              {{ testBusy ? '发送中' : '发测试邮件' }}
-            </button>
-          </div>
-
-          <p v-if="notice" class="notice" :class="{ ok: notice.ok }">{{ notice.text }}</p>
         </header>
 
         <!-- Tabs -->
@@ -396,7 +328,7 @@ watch(() => props.id, () => { load() })
 
         <!-- ===== 抢课 ===== -->
         <template v-else-if="tab === 'grab'">
-          <GrabPanel :student-id="props.id" />
+          <GrabPanel :student-id="sid" />
         </template>
       </template>
     </main>

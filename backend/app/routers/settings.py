@@ -7,8 +7,10 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import Setting
 from ..services.grade import reload_email_config
+from ..services.session import require_admin
 
-router = APIRouter(prefix="/api/settings", tags=["settings"])
+router = APIRouter(prefix="/api/settings", tags=["settings"],
+                   dependencies=[Depends(require_admin)])   # 管理员专用
 
 DEFAULT_SMTP = {
     "smtpHost": "smtp.qq.com",

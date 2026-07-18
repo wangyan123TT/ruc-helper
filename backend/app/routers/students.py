@@ -9,6 +9,7 @@ from ..database import get_db
 from ..models import Student, Grade, now
 from ..schemas import StudentCreate, StudentResponse, MessageResponse
 from ..services.auth import do_login, encrypt_password
+from ..services.session import require_owner, require_admin
 
 router = APIRouter(prefix="/api/students", tags=["students"])
 
@@ -35,7 +36,7 @@ def _to_response(s: Student, db: Session) -> StudentResponse:
     )
 
 
-@router.post("/", response_model=StudentResponse)
+@router.post("/", response_model=StudentResponse, dependencies=[Depends(require_admin)])
 def add_student(body: StudentCreate, db: Session = Depends(get_db)):
     existing = db.query(Student).filter(Student.student_id == body.student_id).first()
     if existing:
@@ -63,12 +64,12 @@ def add_student(body: StudentCreate, db: Session = Depends(get_db)):
     return _to_response(student, db)
 
 
-@router.get("/", response_model=list[StudentResponse])
+@router.get("/", response_model=list[StudentResponse], dependencies=[Depends(require_admin)])
 def list_students(db: Session = Depends(get_db)):
     return [_to_response(s, db) for s in db.query(Student).all()]
 
 
-@router.get("/{student_id}", response_model=StudentResponse)
+@router.get("/{student_id}", response_model=StudentResponse, dependencies=[Depends(require_owner)])
 def get_student(student_id: str, db: Session = Depends(get_db)):
     s = db.query(Student).filter(Student.student_id == student_id).first()
     if not s:
@@ -76,7 +77,7 @@ def get_student(student_id: str, db: Session = Depends(get_db)):
     return _to_response(s, db)
 
 
-@router.delete("/{student_id}", response_model=MessageResponse)
+@router.delete("/{student_id}", response_model=MessageResponse, dependencies=[Depends(require_admin)])
 def delete_student(student_id: str, db: Session = Depends(get_db)):
     s = db.query(Student).filter(Student.student_id == student_id).first()
     if not s:
@@ -86,7 +87,7 @@ def delete_student(student_id: str, db: Session = Depends(get_db)):
     return MessageResponse(message=f"已删除 {student_id}")
 
 
-@router.post("/{student_id}/relogin", response_model=MessageResponse)
+@router.post("/{student_id}/relogin", response_model=MessageResponse, dependencies=[Depends(require_owner)])
 def relogin_student(student_id: str, db: Session = Depends(get_db)):
     s = db.query(Student).filter(Student.student_id == student_id).first()
     if not s:
@@ -111,7 +112,7 @@ def relogin_student(student_id: str, db: Session = Depends(get_db)):
     return MessageResponse(message=f"{student_id} 重新登录成功")
 
 
-@router.post("/{student_id}/monitor", response_model=StudentResponse)
+@router.post("/{student_id}/monitor", response_model=StudentResponse, dependencies=[Depends(require_admin)])
 def toggle_monitor(student_id: str, db: Session = Depends(get_db)):
     s = db.query(Student).filter(Student.student_id == student_id).first()
     if not s:
@@ -121,7 +122,7 @@ def toggle_monitor(student_id: str, db: Session = Depends(get_db)):
     return _to_response(s, db)
 
 
-@router.post("/{student_id}/test-email", response_model=MessageResponse)
+@router.post("/{student_id}/test-email", response_model=MessageResponse, dependencies=[Depends(require_admin)])
 def test_email(student_id: str, db: Session = Depends(get_db)):
     """完整测试：随机删1~3门成绩 → 调用监控轮询（登录+拉取+比对+发邮件）"""
     import random
@@ -186,7 +187,7 @@ def test_email(student_id: str, db: Session = Depends(get_db)):
         raise HTTPException(500, f"测试失败：{e}（已尝试恢复 {count} 门：{', '.join(deleted_names)}）")
 
 
-@router.put("/{student_id}/email", response_model=StudentResponse)
+@router.put("/{student_id}/email", response_model=StudentResponse, dependencies=[Depends(require_owner)])
 def update_email(student_id: str, email: str = "", db: Session = Depends(get_db)):
     s = db.query(Student).filter(Student.student_id == student_id).first()
     if not s:

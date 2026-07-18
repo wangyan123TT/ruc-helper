@@ -14,8 +14,10 @@ from ..models import Student
 from ..services.auth import decrypt_password, do_login
 from ..services.xk import (ApiError, Jw, LoginError, build_payload, fetch,
                            fetch_enrolled)
+from ..services.session import require_owner
 
-router = APIRouter(prefix="/api/timetable", tags=["timetable"])
+router = APIRouter(prefix="/api/timetable", tags=["timetable"],
+                   dependencies=[Depends(require_owner)])   # 只能查自己学号
 
 
 def _login_as(student_id: str, db: Session) -> Jw:
