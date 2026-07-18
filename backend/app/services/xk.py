@@ -184,6 +184,7 @@ def fetch(jw):
         "class_name": c.get("ktmc_name") or "",
         "teacher": c.get("skls_name") or "",
         "category": c.get("kclb_name") or "",
+        "kclbcode": str(c.get("kclbcode") or ""),
         "dept": c.get("kkdw_name") or "",
         "credit": float(c.get("zxf") or 0),
         "pref": int(c.get("xkzy_name") or 0),
@@ -192,26 +193,60 @@ def fetch(jw):
         "slots": parse_kbinfo(c.get("kbinfo")),
     } for c in (res.get("kcCahe") or [])]
 
+    # 单选类别（ms==1，如公共体育）：里面多个志愿是二选一，不算冲突
+    ctx["single_select"] = fetch_single_select_cats(jw, ctx)
     return ctx, courses, res.get("noPassKcCache") or []
+
+
+def fetch_single_select_cats(jw, ctx) -> set:
+    """
+    返回「只选 1 门」的类别码集合（findXsxkjdByOne 里 ms==1 的类别）。
+    这些类别下的多个志愿是互斥备选（如公共体育的养生/健美），不应判为时间冲突。
+    """
+    try:
+        d = jw.post(f"{XK}/findXsxkjdByOne", f"{CC}.findXsxkjdByOne",
+                    {"jczy013id": ctx["jczy013id"], "xkgl017id": ctx["xkgl017id"],
+                     "id": ctx["xkgl019id"]})
+    except ApiError:
+        return set()
+    m = d.get("xfyqMap") or d.get("xfyqNoXnxq") or {}
+    single = set()
+    for lst in (m.get("xkgl011011List") or []):
+        for c in (lst.get("xkgl011021List") or []):
+            if _int(c.get("ms")) == 1:
+                single.add(str(c.get("kclbcode")))
+    return single
 
 
 def sig(c):
     return tuple(sorted((s["day"], tuple(s["periods"])) for s in c["slots"]))
 
 
-def group(courses):
-    """同名课程归并，志愿号最小者为主。返回 (first, alts, ghosts)"""
+def group(courses, single_select=None):
+    """
+    志愿归并，志愿号最小者为主。返回 (first, alts, ghosts)。
+    归并键：
+      · 普通类别：按课程名（同一门课的多个平行班 -> 一组备选）
+      · 单选类别(ms==1，如公共体育)：按类别码（养生/健美等不同名课也归为一组备选，
+        因为只选 1 门，互斥不冲突）
+    first 的键统一用展示名，避免不同键指向同一门课。
+    """
+    single_select = single_select or set()
     g = defaultdict(list)
     for c in courses:
-        g[c["name"]].append(c)
-    first = {n: min(l, key=lambda c: c["pref"] or 99) for n, l in g.items()}
-    alts, ghosts = {}, []
-    for n, l in g.items():
-        alts[n] = sorted((c for c in l if c is not first[n]), key=lambda c: c["pref"] or 99)
-        first[n]["n_pref"] = len(l)
-        first[n]["same_time"] = len({sig(c) for c in l}) == 1
-        # 时间与第一志愿不同的备选班 -> 课表上画"备选落点"
-        ghosts += [c for c in alts[n] if sig(c) != sig(first[n])]
+        code = c.get("kclbcode") or ""
+        key = f"cat:{code}" if code in single_select else f"name:{c['name']}"
+        g[key].append(c)
+
+    first, alts, ghosts = {}, {}, []
+    for key, l in g.items():
+        head = min(l, key=lambda c: c["pref"] or 99)
+        name = head["name"]
+        first[name] = head
+        alts[name] = sorted((c for c in l if c is not head), key=lambda c: c["pref"] or 99)
+        head["n_pref"] = len(l)
+        head["same_time"] = len({sig(c) for c in l}) == 1
+        ghosts += [c for c in alts[name] if sig(c) != sig(head)]
     return first, alts, ghosts
 
 
@@ -226,7 +261,7 @@ def conflicts(first):
 
 def build_payload(ctx, courses):
     """组装成前端好渲染的结构（供 API 返回）"""
-    first, alts, ghosts = group(courses)
+    first, alts, ghosts = group(courses, ctx.get("single_select"))
     gset = {id(g) for g in ghosts}
 
     out = []
