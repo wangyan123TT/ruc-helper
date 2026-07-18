@@ -148,9 +148,13 @@ watch(() => props.id, () => { sid.value = props.id || sid.value; load() })
     <header class="topbar">
       <div class="topbar-inner">
         <span class="brand">微人大选课助手</span>
-        <button class="btn-back" @click="doLogout">
+        <button v-if="props.self" class="btn-back" @click="doLogout">
           退出登录
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </button>
+        <button v-else class="btn-back" @click="router.push('/admin')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+          返回管理台
         </button>
       </div>
     </header>

@@ -41,12 +41,12 @@ api.interceptors.response.use(
   },
 )
 
-export interface LoginResp { token: string; student_id: string; name: string; expires_hours: number }
+export interface LoginResp { token: string; student_id: string; name: string; is_admin?: boolean; expires_hours: number }
 export const login = (student_id: string, password: string) =>
   api.post<LoginResp>('/auth/login', { student_id, password }).then(r => r.data)
 export const logout = () => api.post('/auth/logout').then(r => r.data).catch(() => {})
 export const getMe = () =>
-  api.get<{ student_id: string; name: string; major: string; grade: string }>('/auth/me').then(r => r.data)
+  api.get<{ student_id: string; name: string; is_admin: boolean; major: string; grade: string }>('/auth/me').then(r => r.data)
 
 // Students
 export const addStudent = (data: StudentCreate) =>

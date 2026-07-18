@@ -4,17 +4,23 @@
 登录用教务真登录验证密码（顺手把库里存的加密密码/令牌刷新成最新），
 成功才签发会话令牌。
 """
+import os
+
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DbSession
 
 from ..database import get_db
-from ..models import Student
+from ..models import Session as SessionModel, Student
 from ..services.auth import do_login, encrypt_password
-from ..services.session import (create_session, destroy_session, require_session,
-                                SESSION_HOURS)
+from ..services.session import (create_session, destroy_session, get_current_session,
+                                ADMIN_SID, SESSION_HOURS)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+# 管理员账号（可改：改 .env 的 ADMIN_USERNAME / ADMIN_PASSWORD）
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 
 
 class LoginBody(BaseModel):
@@ -24,22 +30,30 @@ class LoginBody(BaseModel):
 
 @router.post("/login")
 def login(body: LoginBody, db: DbSession = Depends(get_db)):
-    sid = (body.student_id or "").strip()
+    uid = (body.student_id or "").strip()
     pwd = body.password or ""
-    if not sid or not pwd:
-        raise HTTPException(400, "请输入学号和密码")
+    if not uid or not pwd:
+        raise HTTPException(400, "请输入账号和密码")
 
-    # 只放行已开通(库里已添加)的学生
-    student = db.query(Student).filter(Student.student_id == sid).first()
+    # ── 管理员登录 ──
+    if uid == ADMIN_USERNAME:
+        import secrets
+        if not ADMIN_PASSWORD or not secrets.compare_digest(pwd, ADMIN_PASSWORD):
+            raise HTTPException(401, "管理员密码错误")
+        token = create_session(db, ADMIN_SID, is_admin=True)
+        return {"token": token, "student_id": ADMIN_SID, "name": "管理员",
+                "is_admin": True, "expires_hours": SESSION_HOURS}
+
+    # ── 学生登录 ── 只放行已开通(库里已添加)的学生
+    student = db.query(Student).filter(Student.student_id == uid).first()
     if not student:
         raise HTTPException(403, "该学号未开通，请联系管理员添加")
 
     # 用教务真登录验证密码（最可靠；顺便刷新令牌/学生信息）
-    result = do_login(sid, pwd)
+    result = do_login(uid, pwd)
     if not result:
         raise HTTPException(401, "学号或密码错误")
 
-    # 密码正确 —— 更新库里存的加密密码(可能改过密码)与令牌/学生信息
     student.password = encrypt_password(pwd)
     student.res_token = result["resToken"]
     student.session = result["session"]
@@ -50,9 +64,9 @@ def login(body: LoginBody, db: DbSession = Depends(get_db)):
     student.grade = result.get("grade") or student.grade
     db.commit()
 
-    token = create_session(db, sid)
-    return {"token": token, "student_id": sid, "name": student.name or sid,
-            "expires_hours": SESSION_HOURS}
+    token = create_session(db, uid, is_admin=False)
+    return {"token": token, "student_id": uid, "name": student.name or uid,
+            "is_admin": False, "expires_hours": SESSION_HOURS}
 
 
 @router.post("/logout")
@@ -63,6 +77,12 @@ def logout(x_session_token: str = Header(default=""), db: DbSession = Depends(ge
 
 
 @router.get("/me")
-def me(current: Student = Depends(require_session)):
-    return {"student_id": current.student_id, "name": current.name or current.student_id,
-            "major": current.major, "grade": current.grade}
+def me(sess: SessionModel = Depends(get_current_session), db: DbSession = Depends(get_db)):
+    if sess.is_admin:
+        return {"student_id": ADMIN_SID, "name": "管理员", "is_admin": True,
+                "major": "", "grade": ""}
+    s = db.query(Student).filter(Student.student_id == sess.student_id).first()
+    if not s:
+        raise HTTPException(401, "账号不存在")
+    return {"student_id": s.student_id, "name": s.name or s.student_id,
+            "is_admin": False, "major": s.major, "grade": s.grade}

@@ -94,11 +94,13 @@ class Setting(Base):
 
 
 class Session(Base):
-    """登录会话 —— 令牌到学号的映射。存 DB 所以服务重启不掉线。"""
+    """登录会话 —— 令牌到学号的映射。存 DB 所以服务重启不掉线。
+    is_admin=True 为管理员会话（可看所有人 + 管理监控），student_id 存 'admin'。"""
     __tablename__ = "sessions"
 
     token = Column(String(64), primary_key=True)
     student_id = Column(String(20), nullable=False, index=True)
+    is_admin = Column(Boolean, default=False)
     expires_at = Column(DateTime, nullable=False)
     created_at = Column(DateTime, default=now)
 

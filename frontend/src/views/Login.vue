@@ -20,7 +20,7 @@ async function submit() {
   try {
     const r = await login(sid.value.trim(), pwd.value)
     setToken(r.token)
-    router.replace('/')
+    router.replace(r.is_admin ? '/admin' : '/me')
   } catch (e: any) {
     err.value = e.response?.data?.detail || e.message || '登录失败'
   } finally {
