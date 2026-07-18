@@ -91,3 +91,33 @@ class Setting(Base):
 
     key = Column(String(50), primary_key=True)
     value = Column(Text, default="")
+
+
+class GrabTarget(Base):
+    """抢课目标 —— 某学生想抢的某门课（的某个班）。
+
+    抢课器每轮用 kclbcode 重新拉该类别课程列表，靠 course_key 定位到这门课，
+    检测余额；course_json 保存该课完整快照，供提交(第二段)与前端展示时间/地点。
+    """
+    __tablename__ = "grab_targets"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    student_id = Column(String(20), ForeignKey("students.student_id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    course_key = Column(String(64), nullable=False)   # 课程唯一标识(kth)，轮询时用来定位
+    kclbcode = Column(String(20), default="")         # 课程类别码，决定查哪个课程池
+    pool_params = Column(Text, default="{}")          # 子类别维度参数(跨学科的honerItemId/kkdwid等)，重拉池子时透传
+    course_name = Column(String(200), default="")
+    class_name = Column(String(200), default="")       # 教学班名(ktmc_name)
+    teacher = Column(String(100), default="")
+    credit = Column(Float, default=0)
+    priority = Column(Integer, default=0)              # 数字越小越优先
+    # waiting(等待窗口/名额) / grabbing(有名额正在抢) / success(已抢到) / failed / stopped
+    status = Column(String(20), default="waiting")
+    message = Column(Text, default="")                 # 最近一次状态详情
+    course_json = Column(Text, default="{}")           # 课程完整快照(提交/展示用)
+    attempts = Column(Integer, default=0)              # 已尝试提交次数
+    created_at = Column(DateTime, default=now)
+    updated_at = Column(DateTime, default=now, onupdate=now)
+
+    __table_args__ = (UniqueConstraint("student_id", "course_key", name="uq_grab_target"),)

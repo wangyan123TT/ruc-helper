@@ -166,3 +166,86 @@ export interface SemesterSummaryItem {
   pjxfj: number
   sumjd: number
 }
+
+// ---- 抢课（段1：只监控/配置，提交在后端隔离） ----
+
+export interface GrabSlot {
+  weeks: string
+  day: number
+  periods: number[]
+  room: string
+  start: string
+  end: string
+}
+
+export interface GrabSubCategory {
+  name: string
+  group: string                        // '子类别' | '双选认证·按学院' | '荣誉选课'
+  params: Record<string, string>       // 透传给课程池的维度参数
+}
+
+export interface GrabCategory {
+  kclbcode: string
+  name: string
+  count: number
+  subs: GrabSubCategory[]
+}
+
+export interface GrabCategoriesResp {
+  mode: string
+  mode_code: string
+  ctrl: string
+  hd_name: string
+  xkkssj: string
+  xkjssj: string
+  now: string
+  is_time_priority: boolean
+  categories: GrabCategory[]
+}
+
+export interface GrabPoolCourse {
+  course_key: string
+  kclbcode: string
+  name: string
+  class_name: string
+  teacher: string
+  credit: number
+  dept: string
+  cap: number | null
+  enrolled: number | null
+  surplus: number | null
+  slots: GrabSlot[]
+  conflict: { day: number; period: number }[]
+  already_target: boolean
+}
+
+export interface GrabPoolResp {
+  mode_code: string
+  courses: GrabPoolCourse[]
+}
+
+// waiting 等待 | grabbing 盯着 | ready 有名额 | success 抢到 | conflict 冲突已停 | failed 失败
+export type GrabStatus = 'waiting' | 'grabbing' | 'ready' | 'success' | 'conflict' | 'failed'
+
+export interface GrabTarget {
+  id: number
+  student_id: string
+  course_key: string
+  kclbcode: string
+  course_name: string
+  class_name: string
+  teacher: string
+  credit: number
+  priority: number
+  status: GrabStatus
+  message: string
+  attempts: number
+  updated_at: string | null
+}
+
+export interface GrabStatusResp {
+  running: boolean
+  armed: boolean
+  total_targets: number
+  by_status: Record<string, number>
+}

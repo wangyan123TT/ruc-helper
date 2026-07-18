@@ -8,6 +8,10 @@ import type {
   MonitorStatus,
   MonitorHistoryItem,
   TimetableData,
+  GrabCategoriesResp,
+  GrabPoolResp,
+  GrabTarget,
+  GrabStatusResp,
 } from '../types'
 
 const api = axios.create({ baseURL: '/api' })
@@ -64,3 +68,30 @@ export const getMonitorHistory = () =>
 // Timetable — 预选课程表（待筛选志愿）。实时抓取，不入库。
 export const getTimetable = (studentId: string) =>
   api.get<TimetableData>(`/timetable/${studentId}`).then(r => r.data)
+
+// 已选课程表 — 只含选课状态为「通过」的课
+export const getEnrolledTimetable = (studentId: string) =>
+  api.get<TimetableData>(`/timetable/${studentId}/enrolled`).then(r => r.data)
+
+// Grab — 抢课（段1：浏览课程池 + 配目标 + 看状态；提交在后端隔离，尚未启用）
+export const getGrabCategories = (studentId: string) =>
+  api.get<GrabCategoriesResp>(`/grab/${studentId}/categories`).then(r => r.data)
+
+export const getGrabPool = (studentId: string, kclbcode: string, params: Record<string, string> = {}) => {
+  const qs = new URLSearchParams({ kclbcode, ...params }).toString()
+  return api.get<GrabPoolResp>(`/grab/${studentId}/pool?${qs}`).then(r => r.data)
+}
+
+export const getGrabTargets = (studentId: string) =>
+  api.get<GrabTarget[]>(`/grab/${studentId}/targets`).then(r => r.data)
+
+export const addGrabTarget = (
+  studentId: string,
+  body: Partial<GrabTarget> & { course_key: string; kclbcode: string; pool_params?: Record<string, string> },
+) => api.post<GrabTarget>(`/grab/${studentId}/targets`, body).then(r => r.data)
+
+export const removeGrabTarget = (studentId: string, targetId: number) =>
+  api.delete(`/grab/${studentId}/targets/${targetId}`).then(r => r.data)
+
+export const getGrabStatus = () =>
+  api.get<GrabStatusResp>('/grab/status').then(r => r.data)

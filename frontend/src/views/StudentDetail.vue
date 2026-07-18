@@ -2,12 +2,14 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  getStudent, getGrades, refreshGrades, reloginStudent, getGpaSummary, getTimetable,
+  getStudent, getGrades, refreshGrades, reloginStudent, getGpaSummary,
+  getTimetable, getEnrolledTimetable,
   toggleMonitorStudent, testEmailStudent, updateStudentEmail, deleteStudent,
 } from '../api'
 import type { Student, GradeItem, GradeRefreshResult, GpaSummary, TimetableData } from '../types'
 import GradeTable from '../components/GradeTable.vue'
 import TimetableGrid from '../components/TimetableGrid.vue'
+import GrabPanel from '../components/GrabPanel.vue'
 
 const props = defineProps<{ id: string }>()
 const router = useRouter()
@@ -80,13 +82,19 @@ async function removeStudent() {
   }
 }
 
-const tab = ref<'grades' | 'timetable'>('grades')
+type Tab = 'grades' | 'timetable' | 'enrolled' | 'grab'
+const tab = ref<Tab>('grades')
 
-// 预选课表：实时抓（需重新登录教务，约 5 秒），点到才加载
+// 预选课表 / 已选课表：实时抓（需重新登录教务，约 5 秒），点到才加载
 const timetable = ref<TimetableData | null>(null)
 const ttLoading = ref(false)
 const ttError = ref('')
 let _ttGen = 0
+
+const enrolled = ref<TimetableData | null>(null)
+const enLoading = ref(false)
+const enError = ref('')
+let _enGen = 0
 
 async function loadTimetable(force = false) {
   if (ttLoading.value) return
@@ -107,9 +115,29 @@ async function loadTimetable(force = false) {
   }
 }
 
-function switchTab(t: 'grades' | 'timetable') {
+async function loadEnrolled(force = false) {
+  if (enLoading.value) return
+  if (enrolled.value && !force) return
+  const gen = ++_enGen
+  enLoading.value = true
+  enError.value = ''
+  try {
+    const d = await getEnrolledTimetable(props.id)
+    if (gen !== _enGen) return
+    enrolled.value = d
+  } catch (e: any) {
+    if (gen !== _enGen) return
+    enrolled.value = null
+    enError.value = e.response?.data?.detail || e.message || '加载失败'
+  } finally {
+    if (gen === _enGen) enLoading.value = false
+  }
+}
+
+function switchTab(t: Tab) {
   tab.value = t
   if (t === 'timetable') loadTimetable()
+  if (t === 'enrolled') loadEnrolled()
 }
 
 async function load() {
@@ -120,6 +148,8 @@ async function load() {
   gpaSummary.value = null
   timetable.value = null
   ttError.value = ''
+  enrolled.value = null
+  enError.value = ''
   tab.value = 'grades'
   try {
     const [s, g, summary] = await Promise.all([
@@ -224,6 +254,12 @@ watch(() => props.id, () => { load() })
           <button class="tab" :class="{ active: tab === 'timetable' }" @click="switchTab('timetable')">
             预选课表<span v-if="timetable" class="tab-n">{{ timetable.n_courses }}</span>
           </button>
+          <button class="tab" :class="{ active: tab === 'enrolled' }" @click="switchTab('enrolled')">
+            已选课表<span v-if="enrolled" class="tab-n">{{ enrolled.n_courses }}</span>
+          </button>
+          <button class="tab" :class="{ active: tab === 'grab' }" @click="switchTab('grab')">
+            抢课
+          </button>
         </div>
 
         <!-- ===== 成绩 ===== -->
@@ -311,7 +347,7 @@ watch(() => props.id, () => { load() })
         </template>
 
         <!-- ===== 预选课表 ===== -->
-        <template v-else>
+        <template v-else-if="tab === 'timetable'">
           <div class="actions">
             <span>{{ timetable ? timetable.context.hd_name : '待筛选志愿课表' }}</span>
             <button class="btn-refresh" :disabled="ttLoading" @click="loadTimetable(true)">
@@ -331,6 +367,36 @@ watch(() => props.id, () => { load() })
           </div>
 
           <TimetableGrid v-else-if="timetable" :data="timetable" />
+        </template>
+
+        <!-- ===== 已选课表（只含选课状态为「通过」的课） ===== -->
+        <template v-else-if="tab === 'enrolled'">
+          <div class="actions">
+            <span>已选课程表 · 只含选课状态为「通过」的课</span>
+            <button class="btn-refresh" :disabled="enLoading" @click="loadEnrolled(true)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" :class="{ spin: enLoading }"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+              {{ enLoading ? '抓取中' : '重新抓取' }}
+            </button>
+          </div>
+
+          <div v-if="enLoading" class="state">
+            <div class="spinner"></div>
+            <p class="hint">正在查询选课结果，约需 5 秒…</p>
+          </div>
+          <div v-else-if="enError" class="banner err">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            {{ enError }}
+          </div>
+          <div v-else-if="enrolled && enrolled.n_courses === 0" class="banner">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+            暂无已选上的课。当前志愿仍在「待筛选」，筛选结果公布后通过的课会出现在这里。
+          </div>
+          <TimetableGrid v-else-if="enrolled" :data="enrolled" />
+        </template>
+
+        <!-- ===== 抢课 ===== -->
+        <template v-else-if="tab === 'grab'">
+          <GrabPanel :student-id="props.id" />
         </template>
       </template>
     </main>
