@@ -36,15 +36,17 @@ const layout = computed(() => {
     for (const a of c.alts) if (a.is_ghost) place(c, a, true)
   }
 
-  let maxP = 1
-  for (const k of [...starts.keys(), ...covered]) {
-    const p = Number(k.split('-')[1])
-    if (p > maxP) maxP = p
+  // 节次行数按学校节次表(context.periods)的最大节次，覆盖全天；
+  // 不能只按「有课的节次」推，否则只有上午课时，下午/晚上整段会消失。
+  let maxP = 0
+  for (const blk of props.data.context.periods) {
+    for (const s of blk.subs) if (s > maxP) maxP = s
   }
-  for (const b of starts.values()) {
+  for (const b of starts.values()) {          // 兜底：万一有课超出节次表
     const last = b.slot.periods[b.slot.periods.length - 1]
     if (last > maxP) maxP = last
   }
+  if (maxP < 1) maxP = 1
 
   // 节次 -> 大节（取每大节第一小节显示起始时间）
   const pStart = new Map<number, string>()
