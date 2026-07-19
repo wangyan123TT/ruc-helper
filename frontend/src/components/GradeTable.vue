@@ -10,8 +10,9 @@ const semesters = computed(() => groupBySemester(props.grades))
 
 const summary = computed(() => {
   const isPf = (g: GradeItem) => g.cjfscode === '3'
-  const allCredits = props.grades.reduce((s, g) => s + (Number(g.credit) || 0), 0)
-  const allPoints = props.grades.reduce((s, g) => s + (Number(g.grade_point) || 0), 0)
+  // 浮点累加会出 418.29999… 这种，四舍五入到 1 位再展示
+  const allCredits = Math.round(props.grades.reduce((s, g) => s + (Number(g.credit) || 0), 0) * 10) / 10
+  const allPoints = Math.round(props.grades.reduce((s, g) => s + (Number(g.grade_point) || 0), 0) * 10) / 10
   const gpaItems = props.grades.filter(g => !isPf(g))
   const gpaCredits = gpaItems.reduce((s, g) => s + (Number(g.credit) || 0), 0)
   const gpaPoints = gpaItems.reduce((s, g) => s + (Number(g.grade_point) || 0), 0)

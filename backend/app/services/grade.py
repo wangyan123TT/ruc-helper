@@ -167,7 +167,7 @@ def compute_real_gpa(grades: list[Grade]) -> dict:
         "gpa": round(total_points / total_credits, 2) if total_credits > 0 else 0,
         "weighted_avg": round(total_weighted_score / total_credits, 1) if total_credits > 0 else 0,
         "simple_avg": round(total_raw_score / course_count, 1) if course_count > 0 else 0,
-        "credits": total_credits,
+        "credits": round(total_credits, 1),
         "courses": course_count,
     }
 
