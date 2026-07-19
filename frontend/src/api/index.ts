@@ -10,8 +10,11 @@ import type {
   TimetableData,
   GrabCategoriesResp,
   GrabPoolResp,
+  GradeStats,
   GrabTarget,
   GrabStatusResp,
+  CourseTeachersResp,
+  TeacherCoursesResp,
 } from '../types'
 
 const api = axios.create({ baseURL: '/api' })
@@ -88,7 +91,7 @@ export const getGpaSummary = (studentId: string) =>
 export const getMonitorStatus = () =>
   api.get<MonitorStatus>('/monitor/status').then(r => r.data)
 
-export const startMonitor = (interval = 30) =>
+export const startMonitor = (interval = 300) =>
   api.post(`/monitor/start?poll_interval=${interval}`).then(r => r.data)
 
 export const stopMonitor = () =>
@@ -96,6 +99,17 @@ export const stopMonitor = () =>
 
 export const getMonitorHistory = () =>
   api.get<MonitorHistoryItem[]>('/monitor/history').then(r => r.data)
+
+export interface MonitorLog { id: number; student_id: string; status: string; message: string; created_at: string }
+export const getMonitorLogs = () =>
+  api.get<MonitorLog[]>('/monitor/logs').then(r => r.data)
+
+// SMTP 发件设置（带会话令牌，管理员用）
+export interface SmtpSettings { smtpHost: string; smtpPort: string; smtpUsername: string; smtpPassword: string; fromAddress: string }
+export const getSmtpSettings = () =>
+  api.get<SmtpSettings>('/settings/smtp').then(r => r.data)
+export const saveSmtpSettings = (params: Record<string, string>) =>
+  api.put('/settings/smtp?' + new URLSearchParams(params).toString()).then(r => r.data)
 
 // Timetable — 预选课程表（待筛选志愿）。实时抓取，不入库。
 export const getTimetable = (studentId: string) =>
@@ -127,3 +141,35 @@ export const removeGrabTarget = (studentId: string, targetId: number) =>
 
 export const getGrabStatus = () =>
   api.get<GrabStatusResp>('/grab/status').then(r => r.data)
+
+// 历年给分 —— 一门课全部老师排名（「对比老师」弹层）。years 跟课程池的年份选项一致
+export const getCourseTeachers = (course: string, years: string[] = []) =>
+  api.get<CourseTeachersResp>(`/coursestats/course?course=${encodeURIComponent(course)}` +
+    (years.length ? `&years=${years.join(',')}` : '')).then(r => r.data)
+
+// 历年给分 —— 一个老师所有课（「查老师」弹层）
+export const getTeacherCourses = (teacher: string, years: string[] = []) =>
+  api.get<TeacherCoursesResp>(`/coursestats/teacher?teacher=${encodeURIComponent(teacher)}` +
+    (years.length ? `&years=${years.join(',')}` : '')).then(r => r.data)
+
+// 历年给分 —— 已导入的年份
+export const getGradeYears = () =>
+  api.get<{ years: { year: string; teacher_rows: number; graded: number }[] }>('/coursestats/years')
+    .then(r => r.data)
+
+// 批量按 (范围+年份) 算给分，供课程池徽章实时重算
+export const batchGradeStats = (
+  items: { course: string; teacher: string }[],
+  scope: 'course' | 'teacher',
+  years: string[],
+) => api.post<{ results: GradeStats[] }>('/coursestats/batch', { items, scope, years }).then(r => r.data)
+
+// 历年给分 —— 导入某年宽表 CSV / 删除某年（仅管理员）。
+// 直接传原始 File（不在前端解码），后端读原始字节自行试 utf-8/gb18030，避免 GBK 乱码。
+export const importGradeCsv = (year: string, data: File | string) =>
+  api.post(`/coursestats/import?year=${encodeURIComponent(year)}`, data, {
+    headers: { 'Content-Type': 'text/plain' },
+  }).then(r => r.data as { year: string; teacher_rows: number; courses: number; graded: number })
+
+export const deleteGradeYear = (year: string) =>
+  api.delete(`/coursestats/${encodeURIComponent(year)}`).then(r => r.data)

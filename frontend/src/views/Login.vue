@@ -108,7 +108,7 @@ input:focus { outline: 2px solid var(--jade); outline-offset: 1px; border-color:
 }
 button {
   margin-top: 4px; padding: 11px; font-size: 15px; font-weight: 500;
-  background: var(--ink-900); color: #fff; border-radius: var(--radius-sm);
+  background: var(--ink-900); color: var(--paper); border-radius: var(--radius-sm);
   cursor: pointer;
 }
 button:hover { background: var(--ink-700); }

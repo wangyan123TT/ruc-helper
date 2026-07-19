@@ -200,7 +200,7 @@ async function submit() {
   width: 100%;
   padding: 11px;
   background: var(--ink-900);
-  color: #fff;
+  color: var(--paper);
   border-radius: var(--radius-sm);
   font-size: 15px;
   font-weight: 500;

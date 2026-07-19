@@ -306,7 +306,7 @@ input.num { font-family: var(--font-data); }
 .btn.go:hover:not(:disabled) { background: #16704f; }
 .btn.stop { background: var(--white); color: var(--cinnabar); border: 1px solid var(--cinnabar); }
 .btn.stop:hover:not(:disabled) { background: var(--cinnabar-light); }
-.btn.primary { background: var(--ink-900); color: #fff; }
+.btn.primary { background: var(--ink-900); color: var(--paper); }
 .btn.primary:hover:not(:disabled) { background: var(--ink-700); }
 .btn.wide { width: 100%; padding: 10px; margin-top: 12px; }
 

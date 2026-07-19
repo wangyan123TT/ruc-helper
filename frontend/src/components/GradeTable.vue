@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { GradeItem } from '../types'
+import { groupBySemester } from '../utils/semester'
 
 const props = defineProps<{ grades: GradeItem[]; newIds: string[] }>()
+
+// 按学期分组（新学期在前），每组一个学期头 + 小计
+const semesters = computed(() => groupBySemester(props.grades))
 
 const summary = computed(() => {
   const isPf = (g: GradeItem) => g.cjfscode === '3'
@@ -35,9 +39,17 @@ const summary = computed(() => {
             <th class="col-note">备注</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody v-for="s in semesters" :key="s.id">
+          <tr class="sem-band">
+            <td :colspan="11">
+              <div class="sb-inner">
+                <span class="sb-name">{{ s.id }}</span>
+                <span class="sb-meta">{{ s.courses.length }} 门 · {{ s.credits }} 学分<template v-if="s.gpa != null"> · 学期 GPA <b>{{ s.gpa }}</b></template><template v-if="s.avg != null"> · 均分 {{ s.avg }}</template></span>
+              </div>
+            </td>
+          </tr>
           <tr
-            v-for="g in grades"
+            v-for="g in s.courses"
             :key="g.cjgl016id"
             :class="{ 'is-new': newIds.includes(g.cjgl016id), 'is-pf': g.cjfscode === '3' }"
           >
@@ -121,7 +133,7 @@ table {
 th {
   text-align: left;
   padding: 11px 10px;
-  background: #f8f8fb;
+  background: var(--paper-dim);
   color: var(--ink-400);
   font-weight: 600;
   font-size: 11px;
@@ -133,12 +145,12 @@ th {
 
 td {
   padding: 10px;
-  border-bottom: 1px solid #f3f3f6;
+  border-bottom: 1px solid var(--ink-50);
   color: var(--ink-700);
   vertical-align: middle;
 }
 
-tr:hover td { background: #fcfcfd; }
+tr:hover td { background: var(--paper-dim); }
 
 /* Column widths */
 .col-course { width: 18%; }
@@ -155,7 +167,15 @@ th.col-num, th.col-score { text-align: right; }
 .col-score { font-weight: 700; color: var(--ink-900); font-size: 14px; }
 .col-note { color: var(--ink-300); font-size: 12px; }
 
-.is-new td { background: linear-gradient(90deg, #f2faf5 0%, transparent 50%); }
+/* 学期分带头 */
+.sem-band td, .sem-band:hover td { background: linear-gradient(var(--paper-dim), var(--white)); padding: 0; border-top: 1px solid var(--ink-100); border-bottom: 1px solid var(--ink-100); }
+tbody:first-of-type .sem-band td { border-top: none; }
+.sb-inner { display: flex; align-items: baseline; gap: 12px; padding: 9px 14px; flex-wrap: wrap; }
+.sb-name { font-family: var(--serif); font-size: 14.5px; font-weight: 600; color: var(--ink-900); }
+.sb-meta { font-size: 12px; color: var(--ink-400); font-variant-numeric: tabular-nums; }
+.sb-meta b { color: var(--jade); font-family: var(--serif); font-size: 14px; margin: 0 1px; }
+
+.is-new td { background: linear-gradient(90deg, var(--jade-light) 0%, transparent 50%); }
 .is-pf td { color: var(--ink-300); }
 .is-pf .col-score { color: var(--ink-300); font-weight: 400; }
 
@@ -173,7 +193,7 @@ th.col-num, th.col-score { text-align: right; }
 
 /* Footer */
 .row-foot td {
-  background: #f4f4f8;
+  background: var(--paper-dim);
   padding: 12px 16px;
 }
 .foot-inner {
