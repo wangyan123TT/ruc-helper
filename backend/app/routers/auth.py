@@ -6,13 +6,14 @@
 """
 import os
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DbSession
 
 from ..database import get_db
 from ..models import Session as SessionModel, Student
 from ..services.auth import do_login, encrypt_password
+from ..services.ratelimit import throttle, is_locked, record_fail, record_success
 from ..services.session import (create_session, destroy_session, get_current_session,
                                 ADMIN_SID, SESSION_HOURS)
 
@@ -22,6 +23,18 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 
+# 登录限流：每 IP 5 分钟内最多 30 次；单账号连续失败 5 次锁 15 分钟
+_IP_MAX, _IP_WINDOW = 30, 300
+_FAIL_MAX, _LOCK_SEC = 5, 900
+
+
+def _client_ip(request: Request) -> str:
+    """真实客户端 IP：优先 nginx 传的 X-Real-IP / X-Forwarded-For。"""
+    xff = request.headers.get("x-forwarded-for", "")
+    return (request.headers.get("x-real-ip")
+            or (xff.split(",")[0].strip() if xff else "")
+            or (request.client.host if request.client else "?"))
+
 
 class LoginBody(BaseModel):
     student_id: str
@@ -29,17 +42,30 @@ class LoginBody(BaseModel):
 
 
 @router.post("/login")
-def login(body: LoginBody, db: DbSession = Depends(get_db)):
+def login(body: LoginBody, request: Request, db: DbSession = Depends(get_db)):
+    import secrets
+    # ① 按 IP 滑动窗口限流（挡广撒网爆破）
+    wait = throttle(f"login:ip:{_client_ip(request)}", _IP_MAX, _IP_WINDOW)
+    if wait:
+        raise HTTPException(429, f"登录尝试过于频繁，请约 {wait} 秒后再试")
+
     uid = (body.student_id or "").strip()
     pwd = body.password or ""
     if not uid or not pwd:
         raise HTTPException(400, "请输入账号和密码")
 
+    # ② 按账号失败锁定（挡定点爆破，尤其管理员）
+    acct = f"login:acct:{uid.lower()}"
+    locked = is_locked(acct)
+    if locked:
+        raise HTTPException(429, f"该账号失败次数过多，已临时锁定，请约 {locked // 60 + 1} 分钟后再试")
+
     # ── 管理员登录 ──
     if uid == ADMIN_USERNAME:
-        import secrets
         if not ADMIN_PASSWORD or not secrets.compare_digest(pwd, ADMIN_PASSWORD):
+            record_fail(acct, _FAIL_MAX, _LOCK_SEC)
             raise HTTPException(401, "管理员密码错误")
+        record_success(acct)
         token = create_session(db, ADMIN_SID, is_admin=True)
         return {"token": token, "student_id": ADMIN_SID, "name": "管理员",
                 "is_admin": True, "expires_hours": SESSION_HOURS}
@@ -47,12 +73,16 @@ def login(body: LoginBody, db: DbSession = Depends(get_db)):
     # ── 学生登录 ── 只放行已开通(库里已添加)的学生
     student = db.query(Student).filter(Student.student_id == uid).first()
     if not student:
+        record_fail(acct, _FAIL_MAX, _LOCK_SEC)
         raise HTTPException(403, "该学号未开通，请联系管理员添加")
 
     # 用教务真登录验证密码（最可靠；顺便刷新令牌/学生信息）
     result = do_login(uid, pwd)
     if not result:
+        record_fail(acct, _FAIL_MAX, _LOCK_SEC)
         raise HTTPException(401, "学号或密码错误")
+
+    record_success(acct)
 
     student.password = encrypt_password(pwd)
     student.res_token = result["resToken"]
