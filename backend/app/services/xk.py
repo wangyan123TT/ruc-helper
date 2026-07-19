@@ -110,6 +110,25 @@ class Jw:
         raise ApiError(f"{path.rsplit('/', 1)[-1]} 请求失败（重试3次）：{last}")
 
 
+def _parse_weeks(s):
+    """周次串 -> 周次整数集合。兼容 '1,2,3' 展开式与 '1-16'/'1-8,10-16' 区间式。"""
+    out = set()
+    for part in (s or "").replace("周", "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            try:
+                a, b = part.split("-")[:2]
+                out.update(range(int(a), int(b) + 1))
+                continue
+            except ValueError:
+                pass
+        if part.isdigit():
+            out.add(int(part))
+    return out
+
+
 def parse_kbinfo(s):
     """
     kbinfo 是教务自定义编码，无文档，'~' 分隔时段，'@' 分隔字段:
@@ -134,7 +153,8 @@ def parse_kbinfo(s):
         except ValueError:
             continue
         out.append({
-            "weeks": f[0], "day": day, "periods": periods, "room": f[4],
+            "weeks": f[0], "weeks_list": sorted(_parse_weeks(f[1] or f[0])),
+            "day": day, "periods": periods, "room": f[4],
             "start": f"{f[5][:-2] or '0'}:{f[5][-2:]}",
             "end": f"{f[6][:-2] or '0'}:{f[6][-2:]}",
             "campus": f[8] if len(f) > 8 else "",
@@ -251,12 +271,33 @@ def group(courses, single_select=None):
 
 
 def conflicts(first):
-    occ = defaultdict(list)
+    """照搬教务 kcjcct 的判定：同星期 + 节次时间相交 + 周次相交 + 不同课，才算冲突。
+    教务原逻辑是「待选课 vs 已选课」，这里用于预选课表的第一志愿互查（提醒若都选上会撞）。
+    - 同一门课多老师/多重叠时段会在同格出现多次，但课不自冲突（按课名去重）。
+    - 志愿池互斥：单选类别(ms=1)已在 group() 处理；跨课志愿池数据未抓，暂不判。
+    - 周次不相交（如 1-8 周 vs 9-16 周）不算冲突；缺周次数据则保守判冲突。
+    """
+    occ = defaultdict(list)   # (星期,节次) -> [(课名, 周次集合)]
     for n, c in first.items():
         for s in c["slots"]:
+            ws = set(s.get("weeks_list") or [])
             for p in s["periods"]:
-                occ[(s["day"], p)].append(n)
-    return [(d, p, names) for (d, p), names in sorted(occ.items()) if len(names) > 1]
+                occ[(s["day"], p)].append((n, ws))
+    out = []
+    for (d, p), entries in sorted(occ.items()):
+        clash = set()
+        for i in range(len(entries)):
+            ni, wi = entries[i]
+            for j in range(i + 1, len(entries)):
+                nj, wj = entries[j]
+                if ni == nj:
+                    continue                          # 同课不自冲突
+                if (not wi) or (not wj) or (wi & wj):  # 周次相交（缺数据则保守）
+                    clash.add(ni)
+                    clash.add(nj)
+        if len(clash) > 1:
+            out.append((d, p, sorted(clash)))
+    return out
 
 
 def build_payload(ctx, courses):
@@ -322,12 +363,18 @@ def is_passed(c) -> bool:
     return ("通过" in name) or ("已选" in name)   # 名称兜底
 
 
+_ALL_WEEKS = tuple(range(1, 26))
+
+
 def slot_cells(slots):
-    """课程时间 -> {(星期, 节次)} 集合，用于冲突比对"""
+    """课程时间 -> {(星期, 节次, 周次)} 三元组集合，用于冲突比对。
+    对齐教务：冲突要求周次也相交，故把周次也纳入格子；缺周次数据时保守覆盖全学期。"""
     cells = set()
     for s in slots:
+        weeks = s.get("weeks_list") or _ALL_WEEKS
         for p in s["periods"]:
-            cells.add((s["day"], p))
+            for w in weeks:
+                cells.add((s["day"], p, w))
     return cells
 
 

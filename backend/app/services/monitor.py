@@ -16,7 +16,7 @@ TZ = timezone(timedelta(hours=8))
 
 _monitor_task: asyncio.Task | None = None
 _heartbeat_task: asyncio.Task | None = None
-_poll_interval: int = 30
+_poll_interval: int = 300
 _heartbeat_interval: int = 5 * 3600  # 5 小时
 
 
@@ -93,7 +93,7 @@ def poll_student_sync(db: Session, student: Student) -> dict:
     if student.email:
         email_sent = send_grade_email(student.email, student.name or student_id,
                                       sync_result["new_grades"], sync_result["updated_grades"],
-                                      ranking=ranking, real_gpa=real_gpa)
+                                      ranking=ranking, real_gpa=real_gpa, all_grades=all_grades)
 
     if email_sent:
         grade_ids = [g.cjgl016id for g in sync_result["new_grades"] + sync_result["updated_grades"]]

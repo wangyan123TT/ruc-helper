@@ -45,3 +45,7 @@ timetable.html
 # nginx 基础认证密码文件
 nginx-auth/
 nginx-auth.zip
+
+# 真实成绩数据，禁止入库
+*.csv
+学生总成绩汇总*.csv

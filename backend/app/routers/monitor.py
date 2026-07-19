@@ -25,7 +25,7 @@ async def get_status(db: Session = Depends(get_db)):
 
 
 @router.post("/start", response_model=MessageResponse)
-async def start(poll_interval: int = 30):
+async def start(poll_interval: int = 300):
     ok = start_monitor(poll_interval)
     if ok:
         return MessageResponse(message=f"监控已启动，间隔 {poll_interval}s")

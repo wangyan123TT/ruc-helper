@@ -15,6 +15,7 @@ from ..database import get_db
 from ..models import GrabTarget, Student, now
 from ..services.auth import decrypt_password
 from ..services import grab as grab_svc
+from ..services import gradestat
 from ..services import xk
 from ..services.session import require_owner, require_session
 
@@ -101,7 +102,8 @@ def pool(student_id: str, kclbcode: str,
         GrabTarget.student_id == student_id).all()}
     out = []
     for c in courses:
-        conflict = sorted(xk.slot_cells(c["slots"]) & held)
+        # 三元组(星期,节次,周次)相交后去重回(星期,节次)供前端展示
+        conflict = sorted({(d, p) for d, p, _w in (xk.slot_cells(c["slots"]) & held)})
         out.append({
             "course_key": c["course_key"], "kclbcode": c["kclbcode"],
             "name": c["name"], "class_name": c["class_name"], "teacher": c["teacher"],
@@ -110,6 +112,7 @@ def pool(student_id: str, kclbcode: str,
             "slots": c["slots"],
             "conflict": [{"day": d, "period": p} for d, p in conflict],
             "already_target": c["course_key"] in chosen,
+            "grade_stats": gradestat.lookup(db, c["name"], c["teacher"]),
         })
     return {"mode_code": ctx["mode_code"], "courses": out}
 

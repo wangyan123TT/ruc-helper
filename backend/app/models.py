@@ -105,6 +105,35 @@ class Session(Base):
     created_at = Column(DateTime, default=now)
 
 
+class CourseGradeStat(Base):
+    """历年给分分布 —— 按 (年份, 课程, 老师) 聚合后的成绩分布。
+
+    数据来自学校公布的成绩汇总（宽表：每列一个教学班，行含课名/老师/课号/各生成绩）。
+    只存聚合量，不存单个学生分数。评价核心是 86+ / 90+ 占比。
+    course_key / teacher_key 是归一化后的匹配键，见 services/coursematch.py，
+    导入与查询共用同一套归一化，否则课程池里的课对不上历史数据。
+    """
+    __tablename__ = "course_grade_stats"
+
+    id           = Column(Integer, primary_key=True, autoincrement=True)
+    year         = Column(String(8), nullable=False, index=True)   # "2025" / "2024" ...
+    course_name  = Column(String(200), default="")                 # 原始课名
+    course_key   = Column(String(200), default="", index=True)     # 归一化课名(精确匹配)
+    course_loose = Column(String(200), default="", index=True)     # 去括号后的宽松 key(兜底匹配)
+    teacher      = Column(String(100), default="")                 # 原始老师名
+    teacher_key  = Column(String(100), default="", index=True)     # 归一化老师名
+    n_graded     = Column(Integer, default=0)                      # 有效数字成绩人数
+    ge86         = Column(Integer, default=0)                      # ≥86 人数
+    ge90         = Column(Integer, default=0)                      # ≥90 人数
+    n_pass       = Column(Integer, default=0)                      # 记 P(通过) 的人数
+    avg          = Column(Float, default=0)                        # 数字成绩均分
+    sections     = Column(Integer, default=0)                      # 合并了几个教学班
+    created_at   = Column(DateTime, default=now)
+
+    __table_args__ = (UniqueConstraint("year", "course_key", "teacher_key",
+                                       name="uq_course_grade_stat"),)
+
+
 class GrabTarget(Base):
     """抢课目标 —— 某学生想抢的某门课（的某个班）。
 

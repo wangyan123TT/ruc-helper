@@ -172,6 +172,57 @@ def compute_real_gpa(grades: list[Grade]) -> dict:
     }
 
 
+def _sem_sort_key(s: str) -> int:
+    """学期时间序键：学年首年*10 + 学期序(秋1 春2 夏3)。越大越新，同学年内 秋<春<夏。"""
+    import re
+    m = re.search(r"20\d{2}", s or "")
+    y = int(m.group()) if m else 0
+    if re.search(r"秋|第?一学期", s or ""):
+        t = 1
+    elif re.search(r"春|第?二学期", s or ""):
+        t = 2
+    elif re.search(r"夏|第?三学期", s or ""):
+        t = 3
+    else:
+        t = 0
+    return y * 10 + t
+
+
+def compute_semester_gpa(grades: list) -> list[dict]:
+    """按学期算 GPA，口径同 compute_real_gpa（不含 P/F，Σ学分绩点/Σ学分），与前端页面一致。
+    新学期在前。用于成绩通知邮件的「各学期汇总」，避免用教务含 P/F 的 pjxfjd 造成前后不一致。"""
+    groups: dict[str, list] = {}
+    for g in grades:
+        groups.setdefault(g.semester or "其他", []).append(g)
+    out = []
+    for sem, gs in groups.items():
+        pts = crd = wsum = rsum = 0.0
+        n = 0
+        credits_all = 0.0
+        for g in gs:
+            credits_all += g.credit or 0
+            if g.cjfscode == "3" or g.score in ("P", "-", ""):
+                continue
+            try:
+                sc = float(g.score)
+            except (ValueError, TypeError):
+                continue
+            pts += g.grade_point or 0
+            crd += g.credit or 0
+            wsum += sc * (g.credit or 0)
+            rsum += sc
+            n += 1
+        out.append({
+            "semester": sem,
+            "courses": len(gs),
+            "credits": round(credits_all, 1),
+            "gpa": round(pts / crd, 2) if crd else None,
+            "avg": round(rsum / n, 1) if n else None,
+        })
+    out.sort(key=lambda x: _sem_sort_key(x["semester"]), reverse=True)
+    return out
+
+
 def sync_grades(db: Session, student: Student, raw_grades: list[dict]) -> dict:
     """将原始成绩数据同步到数据库，返回变动摘要"""
     student_id = student.student_id
@@ -262,143 +313,134 @@ def sync_grades(db: Session, student: Student, raw_grades: list[dict]) -> dict:
     }
 
 
-def send_grade_email(to_address: str, student_name: str, new_grades: list, updated_grades: list,
-                     ranking: dict | None = None, real_gpa: dict | None = None):
-    """发送成绩变动通知邮件"""
-    if not EMAIL_CONFIG.get("smtpUsername"):
-        print("[email] 未配置 SMTP，跳过邮件发送")
-        return False
-    if not to_address:
-        print("[email] 未配置收件邮箱")
-        return False
+def build_grade_email_html(student_name: str, new_grades: list, updated_grades: list,
+                           ranking: dict | None = None, real_gpa: dict | None = None,
+                           all_grades: list | None = None):
+    """拼成绩通知邮件 -> (标题, html)。与发送解耦，便于预览/测试。"""
+    from . import notify
 
     now_str = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
-
-    # ── 样式 ──
-    css = "body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1a1a2e;line-height:1.5}"
-    box = "border-radius:10px;padding:20px;margin:16px 0"
-    th_style = "padding:8px 12px;text-align:left;font-size:12px;font-weight:600;color:#666;border-bottom:2px solid #e0e0e0"
-    td_style = "padding:8px 12px;border-bottom:1px solid #f0f0f0;font-size:13px"
-    num = ";text-align:right;font-variant-numeric:tabular-nums"
-    h3 = "margin:0 0 12px;font-size:15px"
-
-    # ── GPA 分组表 ──
     mr = (ranking or {}).get("major_rank", {}) or {}
-    gpa_r = (ranking or {}).get("gpa_rank", {}) or {}
     avg_r = (ranking or {}).get("avg_rank", {}) or {}
     wgt_r = (ranking or {}).get("weighted_rank", {}) or {}
-    ss = (ranking or {}).get("semester_summary", []) or []
+    sems = compute_semester_gpa(all_grades or [])   # 口径同页面（不含 P/F），非教务含 P/F 的 pjxfjd
+    rg = real_gpa or {}
 
-    gpa_rows = ""
-    # Group 1: GPA
-    gpa_rows += f"<tr><td style='{td_style};font-weight:600'>平均学分绩点</td>"
-    gpa_rows += f"<td style='{td_style}{num};font-size:20px;font-weight:700;color:#1a1a2e'>{mr.get('pjxfjd','') or (real_gpa or {}).get('gpa','')}</td>"
-    gpa_rows += f"<td style='{td_style}{num}'>专业第{mr.get('pm','?')}</td>"
-    gpa_rows += f"<td style='{td_style}{num}'>班级第{mr.get('bjpm','?')}</td></tr>"
+    INK, DIM, LINE = notify.INK, notify.INK_DIM, notify.LINE
+    gpa_val = rg.get("gpa") or mr.get("pjxfjd") or "—"   # 与页面 hero 一致：真实 GPA（不含 P/F）优先
+    info = f"{mr.get('ndzy_name', '')} {mr.get('skdw_name', '')}".strip()
 
-    if gpa_r:
-        gpa_rows += f"<tr><td style='{td_style};color:#999'>  └ 含P/F课</td>"
-        gpa_rows += f"<td style='{td_style}{num};color:#999'>{gpa_r.get('pjxfjd','')}</td>"
-        gpa_rows += f"<td style='{td_style}{num}'colspan=2>班级第{gpa_r.get('pm','?')}</td></tr>"
+    # 顶部高亮
+    pills = ""
+    if new_grades:
+        pills += notify.pill(f"新出 {len(new_grades)} 门", notify.JADE)
+    if updated_grades:
+        pills += notify.pill(f"更新 {len(updated_grades)} 门", notify.GOLD)
+    body = f"<div style='margin:8px 0 2px'>{pills}</div>" if pills else ""
 
-    # Group 2: Weighted avg
-    gpa_rows += f"<tr><td style='{td_style};font-weight:600'>学分加权平均分</td>"
-    gpa_rows += f"<td style='{td_style}{num};font-size:18px;font-weight:600'>{mr.get('pjxfj','') or (real_gpa or {}).get('weighted_avg','')}</td>"
-    gpa_rows += f"<td style='{td_style}{num}'colspan=2>{'班级第'+str(wgt_r.get('pm','?')) if wgt_r else ''}</td></tr>"
+    # 成绩卡：分档着色 + 左侧色条
+    def _card(g, tag, tag_color):
+        c = notify.score_color(getattr(g, "score", ""))
+        sub = f"{g.credit}学分 · {g.teacher or '—'}"
+        extra = []
+        if g.daily_score:
+            extra.append(f"平时{g.daily_score}")
+        if g.midterm_score:
+            extra.append(f"期中{g.midterm_score}")
+        if g.final_score:
+            extra.append(f"期末{g.final_score}")
+        if extra:
+            sub += " · " + " ".join(extra)
+        if g.grade_point not in (None, ""):
+            sub += f" · 绩点{g.grade_point}"
+        score = getattr(g, "score", "—")
+        return (
+            f"<table role='presentation' width='100%' cellpadding='0' cellspacing='0' "
+            f"style='border:1px solid {LINE};border-left:3px solid {c};border-radius:10px;margin:0 0 8px'>"
+            f"<tr><td style='padding:11px 14px'>"
+            f"<div style='font-size:15px;font-weight:600;color:{INK}'>{g.course_name}"
+            f"<span style='font-size:10px;font-weight:700;color:{tag_color};margin-left:8px'>{tag}</span></div>"
+            f"<div style='font-size:12px;color:{DIM};margin-top:3px'>{sub}</div></td>"
+            f"<td width='58' align='right' style='padding:11px 16px 11px 4px;vertical-align:middle'>"
+            f"<span style='font-size:26px;font-weight:700;color:{c}'>{score}</span></td>"
+            f"</tr></table>"
+        )
 
-    # Group 3: Simple avg
-    gpa_rows += f"<tr><td style='{td_style};font-weight:600'>算术平均分</td>"
-    gpa_rows += f"<td style='{td_style}{num};font-size:18px;font-weight:600'>{avg_r.get('xssscj','') or (real_gpa or {}).get('simple_avg','')}</td>"
-    gpa_rows += f"<td style='{td_style}{num}'colspan=2>{'班级第'+str(avg_r.get('pm','?')) if avg_r else ''}</td></tr>"
+    cards = "".join(_card(g, "新", notify.JADE) for g in (new_grades or []))
+    cards += "".join(_card(g, "更新", notify.GOLD) for g in (updated_grades or []))
+    if cards:
+        body += notify.section("这次的变动", cards)
 
-    # Semester summary
-    sem_rows = ""
-    if ss:
-        for s in ss:
-            sem_rows += f"<tr><td style='{td_style}'>{s.get('jczy013id','')}</td><td style='{td_style}{num}'>{s.get('kcnum','')}门</td><td style='{td_style}{num}'>{s.get('zxf','')}学分</td><td style='{td_style}{num}'>GPA {s.get('pjxfjd','')}</td><td style='{td_style}{num}'>均分{s.get('pjxfj','')}</td></tr>"
+    # 学业总览
+    def _stat(label, val, rank, big=True):
+        vs = "20px" if big else "17px"
+        return (
+            f"<tr><td style='padding:9px 0;border-bottom:1px solid {LINE};font-size:13px;color:{INK}'>{label}</td>"
+            f"<td align='right' style='padding:9px 0;border-bottom:1px solid {LINE};font-size:{vs};font-weight:700;color:{INK}'>{val}</td>"
+            f"<td align='right' style='padding:9px 0 9px 14px;border-bottom:1px solid {LINE};font-size:12px;color:{DIM};white-space:nowrap'>{rank or ''}</td></tr>"
+        )
 
-    info = f"{mr.get('ndzy_name','')} {mr.get('skdw_name','')}" if mr else ""
-    courses_info = f"{(real_gpa or {}).get('courses','')}门 / {(real_gpa or {}).get('credits','')}学分" if real_gpa else ""
+    rank1 = []
+    if mr.get("pm"):
+        rank1.append(f"专业第{mr['pm']}")
+    if mr.get("bjpm"):
+        rank1.append(f"班级第{mr['bjpm']}")
+    gpa_tbl = "<table role='presentation' width='100%' cellpadding='0' cellspacing='0'>"
+    gpa_tbl += _stat("平均学分绩点", gpa_val, " · ".join(rank1))
+    if mr.get("pjxfj") or rg.get("weighted_avg"):
+        gpa_tbl += _stat("学分加权均分", mr.get("pjxfj") or rg.get("weighted_avg"),
+                         f"班级第{wgt_r['pm']}" if wgt_r.get("pm") else "", big=False)
+    if avg_r.get("xssscj") or rg.get("simple_avg"):
+        gpa_tbl += _stat("算术平均分", avg_r.get("xssscj") or rg.get("simple_avg"),
+                         f"班级第{avg_r['pm']}" if avg_r.get("pm") else "", big=False)
+    gpa_tbl += "</table>"
+    if rg.get("courses"):
+        gpa_tbl += f"<div style='margin:10px 0 0;font-size:11px;color:{DIM}'>{rg.get('courses', '')} 门 · {rg.get('credits', '')} 学分累计</div>"
+    body += notify.section("学业总览", gpa_tbl)
 
-    # ── 成绩变动表格 ──
-    grade_rows = ""
-    for g in (new_grades or []):
-        grade_rows += f"<tr style='background:#f2faf5'>"
-        grade_rows += f"<td style='{td_style}'>{g.course_name}</td>"
-        grade_rows += f"<td style='{td_style}{num};font-weight:700;font-size:16px'>{getattr(g,'score','-')}</td>"
-        grade_rows += f"<td style='{td_style}{num}'>{g.credit}</td>"
-        grade_rows += f"<td style='{td_style}{num}'>{g.daily_score or '-'}</td>"
-        grade_rows += f"<td style='{td_style}{num}'>{g.midterm_score or '-'}</td>"
-        grade_rows += f"<td style='{td_style}{num}'>{g.final_score or '-'}</td>"
-        grade_rows += f"<td style='{td_style}{num}'>{g.grade_point}</td>"
-        grade_rows += f"<td style='{td_style}'>{g.teacher}</td></tr>"
+    # 各学期汇总（口径同页面：不含 P/F，Σ学分绩点/Σ学分；新学期在前）
+    if sems:
+        th = f"padding:7px 8px;font-size:11px;color:{DIM};text-align:right;border-bottom:2px solid {LINE}"
+        td = f"padding:6px 8px;font-size:12px;color:{INK};text-align:right;border-bottom:1px solid {LINE}"
+        rows = (f"<tr><th style='{th};text-align:left'>学期</th><th style='{th}'>课程</th>"
+                f"<th style='{th}'>学分</th><th style='{th}'>学期GPA</th><th style='{th}'>均分</th></tr>")
+        for s in sems:
+            gpa_txt = s["gpa"] if s["gpa"] is not None else "—"
+            avg_txt = s["avg"] if s["avg"] is not None else "—"
+            rows += (f"<tr><td style='{td};text-align:left'>{s['semester']}</td>"
+                     f"<td style='{td}'>{s['courses']}门</td><td style='{td}'>{s['credits']}</td>"
+                     f"<td style='{td}'>{gpa_txt}</td><td style='{td}'>{avg_txt}</td></tr>")
+        sem_tbl = (f"<table role='presentation' width='100%' cellpadding='0' cellspacing='0' style='border-collapse:collapse'>{rows}</table>"
+                   f"<div style='margin:8px 0 0;font-size:11px;color:{DIM}'>学期 GPA 与页面口径一致：不含 P/F 课。</div>")
+        body += notify.section("各学期汇总", sem_tbl)
 
-    for g in (updated_grades or []):
-        grade_rows += f"<tr style='background:#fef9f0'>"
-        grade_rows += f"<td style='{td_style}'>{g.course_name}</td>"
-        grade_rows += f"<td style='{td_style}{num};font-weight:700;font-size:16px'>{getattr(g,'score','-')}</td>"
-        grade_rows += f"<td style='{td_style}{num}'>{g.credit}</td>"
-        grade_rows += f"<td style='{td_style}{num}'>{g.daily_score or '-'}</td>"
-        grade_rows += f"<td style='{td_style}{num}'>{g.midterm_score or '-'}</td>"
-        grade_rows += f"<td style='{td_style}{num}'>{g.final_score or '-'}</td>"
-        grade_rows += f"<td style='{td_style}{num}'>{g.grade_point}</td>"
-        grade_rows += f"<td style='{td_style}'>{g.teacher}</td></tr>"
+    # 标题 / 主题
+    if new_grades and updated_grades:
+        title = f"新出 {len(new_grades)} 门 · 更新 {len(updated_grades)} 门"
+    elif new_grades:
+        title = f"新出 {len(new_grades)} 门成绩"
+    elif updated_grades:
+        title = f"{len(updated_grades)} 门成绩更新"
+    else:
+        title = "成绩有变动"
+    parts = [student_name, info]
+    if gpa_val != "—":
+        parts.append(f"当前 GPA {gpa_val}")
+    parts.append(now_str)
+    intro = " · ".join(x for x in parts if x)
 
-    # ── 组装 ──
-    body = f"""<html><head><meta charset=utf-8><style>{css}</style></head><body>
-    <div style='max-width:640px;margin:0 auto;padding:20px'>
+    html = notify.render_email(kicker="成绩通知", title=title, intro=intro, body=body, accent=notify.CINNABAR)
+    return title, html
 
-    <h2 style='margin:0 0 4px;font-size:20px'>成绩变动通知</h2>
-    <p style='margin:0 0 20px;color:#999;font-size:13px'>{student_name} · {now_str} · {info} · {courses_info}</p>
 
-    <div style='background:#f8f9fb;{box}'>
-    <h3 style='{h3};color:#1a1a2e'>当前成绩总览</h3>
-    <table style='width:100%;border-collapse:collapse'>
-    <tr><th style='{th_style}'>指标</th><th style='{th_style}{num}'>分数</th><th style='{th_style}{num}'>排名</th><th style='{th_style}{num}'>排名2</th></tr>
-    {gpa_rows}
-    </table>
-    </div>"""
-
-    if grade_rows:
-        body += f"""
-        <div style='{box}'>
-        <h3 style='{h3};color:#1a1a2e'>成绩变动</h3>
-        <table style='width:100%;border-collapse:collapse'>
-        <tr><th style='{th_style}'>课程</th><th style='{th_style}{num}'>成绩</th><th style='{th_style}{num}'>学分</th><th style='{th_style}{num}'>平时</th><th style='{th_style}{num}'>期中</th><th style='{th_style}{num}'>期末</th><th style='{th_style}{num}'>绩点</th><th style='{th_style}'>教师</th></tr>
-        {grade_rows}
-        </table>
-        </div>"""
-
-    if sem_rows:
-        body += f"""
-        <div style='background:#f8f9fb;{box}'>
-        <h3 style='{h3};color:#1a1a2e'>各学期汇总</h3>
-        <p style='margin:0 0 8px;font-size:11px;color:#999'>系统核算（含P/F课按1.0绩点计入），真实GPA见上方总览</p>
-        <table style='width:100%;border-collapse:collapse'>
-        <tr><th style='{th_style}'>学期</th><th style='{th_style}{num}'>课程</th><th style='{th_style}{num}'>学分</th><th style='{th_style}{num}'>GPA</th><th style='{th_style}{num}'>均分</th></tr>
-        {sem_rows}
-        </table></div>"""
-
-    body += """<p style='margin-top:24px;font-size:11px;color:#bbb'>RUC Helper 自动发送</p></div></body></html>"""
-
-    try:
-        msg = MIMEText(body, "html", "utf-8")
-        msg["From"] = EMAIL_CONFIG["fromAddress"]
-        msg["To"] = to_address
-        subj = []
-        if new_grades: subj.append(f"新出{len(new_grades)}门")
-        if updated_grades: subj.append(f"更新{len(updated_grades)}门")
-        msg["Subject"] = f"[成绩通知] {'，'.join(subj)}" if subj else "[成绩通知]"
-        server = smtplib.SMTP(EMAIL_CONFIG["smtpHost"], EMAIL_CONFIG["smtpPort"], timeout=15)
-        server.starttls()
-        server.login(EMAIL_CONFIG["smtpUsername"], EMAIL_CONFIG["smtpPassword"])
-        server.sendmail(EMAIL_CONFIG["fromAddress"], [to_address], msg.as_string())
-        server.quit()
-        print(f"[email] 已发送至 {to_address}")
-        return True
-    except Exception as e:
-        print(f"[email] 发送失败: {e}")
-        return False
+def send_grade_email(to_address: str, student_name: str, new_grades: list, updated_grades: list,
+                     ranking: dict | None = None, real_gpa: dict | None = None,
+                     all_grades: list | None = None):
+    """发送成绩变动通知邮件（品牌化，走通用通道 notify）。"""
+    from . import notify
+    title, html = build_grade_email_html(student_name, new_grades, updated_grades,
+                                         ranking, real_gpa, all_grades)
+    return notify.send_html(to_address, f"选课助手 · {title}", html)
 
 
 def _grade_to_response(g: Grade, is_new: bool = False) -> GradeResponse:
