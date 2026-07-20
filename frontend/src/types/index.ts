@@ -238,6 +238,17 @@ export interface CourseTeachersResp {
   teachers: CourseTeacherRow[]
 }
 
+// 给分查询（独立搜索页）：模糊搜索聚合到 (课, 师) 一行
+export interface GradeSearchRow extends GradeRatio {
+  course: string
+  teacher: string
+  by_year: GradeYear[]
+}
+export interface GradeSearchResp {
+  rows: GradeSearchRow[]
+  total: number
+}
+
 // 「查老师」弹层里每一行（该老师的一门课）
 export interface TeacherCourseRow extends GradeRatio {
   course: string

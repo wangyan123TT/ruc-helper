@@ -152,6 +152,12 @@ export const getTeacherCourses = (teacher: string, years: string[] = []) =>
   api.get<TeacherCoursesResp>(`/coursestats/teacher?teacher=${encodeURIComponent(teacher)}` +
     (years.length ? `&years=${years.join(',')}` : '')).then(r => r.data)
 
+// 给分查询 —— 模糊搜索（mode=course 按课名 / teacher 按老师）
+export const searchGrades = (q: string, mode: 'course' | 'teacher', years: string[] = []) =>
+  api.get<import('../types').GradeSearchResp>(
+    `/coursestats/search?q=${encodeURIComponent(q)}&mode=${mode}` +
+    (years.length ? `&years=${years.join(',')}` : '')).then(r => r.data)
+
 // 历年给分 —— 已导入的年份
 export const getGradeYears = () =>
   api.get<{ years: { year: string; teacher_rows: number; graded: number }[] }>('/coursestats/years')

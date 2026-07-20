@@ -9,6 +9,7 @@ import OverviewPanel from '../components/OverviewPanel.vue'
 import GradeTable from '../components/GradeTable.vue'
 import TimetablePanel from '../components/TimetablePanel.vue'
 import GrabPanel from '../components/GrabPanel.vue'
+import GradeSearchView from '../components/GradeSearchView.vue'
 
 // self=true 时从 /me 解析自己的学号；否则用路由传入的 id（管理台点进来）
 const props = defineProps<{ id?: string; self?: boolean }>()
@@ -19,11 +20,11 @@ const { student, grades, gpa, loading, refreshing, result, load, refresh } = use
 const { data: preData, loading: preLoading, error: preError, load: loadPre, reset: resetPre } = useTimetable(sid, 'preselect')
 const { data: enrData, loading: enrLoading, error: enrError, load: loadEnr, reset: resetEnr } = useTimetable(sid, 'enrolled')
 
-type Nav = 'overview' | 'grades' | 'timetable' | 'enrolled' | 'grab'
+type Nav = 'overview' | 'grades' | 'timetable' | 'enrolled' | 'grab' | 'gradesearch'
 const nav = ref<Nav>('overview')
 const NAV_TITLE: Record<Nav, string> = {
   overview: '学业概览', grades: '成绩明细',
-  timetable: '预选课表', enrolled: '已选课表', grab: '抢课',
+  timetable: '预选课表', enrolled: '已选课表', grab: '抢课', gradesearch: '给分查询',
 }
 
 const seal = computed(() => (student.value?.name || student.value?.student_id || '').slice(0, 3))
@@ -46,6 +47,7 @@ const navGroups = computed(() => [
       { key: 'timetable', label: '预选课表', icon: 'preselect', count: preData.value?.n_courses ?? null },
       { key: 'enrolled', label: '已选课表', icon: 'enrolled', count: enrData.value?.n_courses ?? null },
       { key: 'grab', label: '抢课', icon: 'grab' },
+      { key: 'gradesearch', label: '给分查询', icon: 'search' },
     ],
   },
 ])
@@ -113,6 +115,7 @@ watch(() => props.id, () => { if (props.id) { sid.value = props.id; boot() } })
           <TimetablePanel v-else-if="nav === 'timetable'" kind="preselect" :data="preData" :loading="preLoading" :error="preError" @refresh="loadPre(true)" />
           <TimetablePanel v-else-if="nav === 'enrolled'" kind="enrolled" :data="enrData" :loading="enrLoading" :error="enrError" @refresh="loadEnr(true)" />
           <GrabPanel v-else-if="nav === 'grab'" :student-id="sid" />
+          <GradeSearchView v-else-if="nav === 'gradesearch'" />
         </template>
       </div>
     </div>
