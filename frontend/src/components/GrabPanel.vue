@@ -161,7 +161,14 @@ function p90(c: GrabPoolCourse): number {
   const h = head(c)
   return (!h || h.pass_fail || h.p90 == null) ? -1 : h.p90
 }
-const yy = (year?: string) => (year || '').slice(-2)
+// 学期标签缩写："2024-2025春"->"25春"(春/夏取次年)、"2024-2025秋"->"24秋"(秋取首年)；旧纯数字兜底
+function yy(year?: string): string {
+  const s = year || ''
+  const ys = s.match(/20\d{2}/g) || []
+  if (/春|夏/.test(s)) return (ys[1] || ys[0] || '').slice(2) + (/夏/.test(s) ? '夏' : '春')
+  if (/秋/.test(s)) return (ys[0] || '').slice(2) + '秋'
+  return s.slice(-2)
+}
 
 // 按当前 范围+年份 批量重算给分（只查本地库，很快；切设置即调）
 async function recomputeStats() {
@@ -442,7 +449,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
         </div>
         <table v-else class="cmp-table">
           <thead>
-            <tr><th>老师</th><th v-for="y in compareYears" :key="y" class="ct-yr">{{ yy(y) }}年</th><th>人数</th></tr>
+            <tr><th>老师</th><th v-for="y in compareYears" :key="y" class="ct-yr">{{ yy(y) }}</th><th>人数</th></tr>
           </thead>
           <tbody>
             <tr v-for="t in sortedCompareTeachers" :key="t.teacher"
@@ -485,7 +492,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
         </div>
         <table v-else class="cmp-table">
           <thead>
-            <tr><th>课程</th><th v-for="y in teacherYears" :key="y" class="ct-yr">{{ yy(y) }}年</th><th>人数</th></tr>
+            <tr><th>课程</th><th v-for="y in teacherYears" :key="y" class="ct-yr">{{ yy(y) }}</th><th>人数</th></tr>
           </thead>
           <tbody>
             <tr v-for="(c, i) in sortedTeacherCourses" :key="c.course + i"
