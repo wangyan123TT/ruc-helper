@@ -209,7 +209,7 @@ def get_heartbeat_email() -> str:
     return _get_heartbeat_email()
 
 
-def start_monitor(poll_interval: int = 30):
+def start_monitor(poll_interval: int = 300):
     global _monitor_task, _heartbeat_task, _poll_interval
     _poll_interval = max(5, min(3600, poll_interval))
 

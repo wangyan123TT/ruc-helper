@@ -13,7 +13,7 @@ services:
       - .env
     environment:
       - DATABASE_URL=sqlite:////app/data/grades.db
-      - POLL_INTERVAL=30
+      - POLL_INTERVAL=300
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     restart: unless-stopped
 
