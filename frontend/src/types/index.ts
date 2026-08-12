@@ -203,64 +203,6 @@ export interface GrabCategoriesResp {
   categories: GrabCategory[]
 }
 
-// 历年给分 —— 一门课/一个老师合并跨年后的占比
-export interface GradeRatio {
-  pass_fail: boolean
-  n: number                            // 有效数字成绩人数
-  n_pass?: number
-  p86?: number                         // ≥86 占比 %
-  p90?: number                         // ≥90 占比 %（经验上被优秀率卡在~30%）
-  small?: boolean                      // n<15 小样本
-}
-
-export interface GradeYear extends GradeRatio {
-  year: string
-}
-
-// 挂在课程池每门课上的给分数据
-export interface GradeStats {
-  match: 'exact' | 'course' | 'teacher' | 'none'   // 此课此师 / 全课程 / 该师全部课 / 无数据
-  teacher?: string
-  headline?: GradeRatio
-  by_year?: GradeYear[]
-  n_teachers?: number                  // match=course 时该课共几位老师
-  pass_fail?: boolean
-}
-
-// 「对比老师」弹层里每一行
-export interface CourseTeacherRow extends GradeRatio {
-  teacher: string
-  by_year: GradeYear[]
-}
-
-export interface CourseTeachersResp {
-  course: string
-  teachers: CourseTeacherRow[]
-}
-
-// 给分查询（独立搜索页）：模糊搜索聚合到 (课, 师) 一行
-export interface GradeSearchRow extends GradeRatio {
-  course: string
-  teacher: string
-  by_year: GradeYear[]
-}
-export interface GradeSearchResp {
-  rows: GradeSearchRow[]
-  total: number
-}
-
-// 「查老师」弹层里每一行（该老师的一门课）
-export interface TeacherCourseRow extends GradeRatio {
-  course: string
-  teacher: string
-  by_year: GradeYear[]
-}
-
-export interface TeacherCoursesResp {
-  teachers: string[]                   // 匹配到的老师名（合上课可能多个）
-  courses: TeacherCourseRow[]
-}
-
 export interface GrabPoolCourse {
   course_key: string
   kclbcode: string
@@ -275,7 +217,6 @@ export interface GrabPoolCourse {
   slots: GrabSlot[]
   conflict: { day: number; period: number }[]
   already_target: boolean
-  grade_stats: GradeStats
 }
 
 export interface GrabPoolResp {

@@ -15,7 +15,6 @@ from ..database import get_db
 from ..models import GrabTarget, Student, now
 from ..services.auth import decrypt_password
 from ..services import grab as grab_svc
-from ..services import gradestat
 from ..services import xk
 from ..services.session import require_owner, require_session
 
@@ -112,7 +111,6 @@ def pool(student_id: str, kclbcode: str,
             "slots": c["slots"],
             "conflict": [{"day": d, "period": p} for d, p in conflict],
             "already_target": c["course_key"] in chosen,
-            "grade_stats": gradestat.lookup(db, c["name"], c["teacher"]),
         })
     return {"mode_code": ctx["mode_code"], "courses": out}
 

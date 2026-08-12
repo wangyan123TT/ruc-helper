@@ -10,11 +10,8 @@ import type {
   TimetableData,
   GrabCategoriesResp,
   GrabPoolResp,
-  GradeStats,
   GrabTarget,
   GrabStatusResp,
-  CourseTeachersResp,
-  TeacherCoursesResp,
 } from '../types'
 
 const api = axios.create({ baseURL: '/api' })
@@ -142,40 +139,3 @@ export const removeGrabTarget = (studentId: string, targetId: number) =>
 export const getGrabStatus = () =>
   api.get<GrabStatusResp>('/grab/status').then(r => r.data)
 
-// 历年给分 —— 一门课全部老师排名（「对比老师」弹层）。years 跟课程池的年份选项一致
-export const getCourseTeachers = (course: string, years: string[] = []) =>
-  api.get<CourseTeachersResp>(`/coursestats/course?course=${encodeURIComponent(course)}` +
-    (years.length ? `&years=${years.join(',')}` : '')).then(r => r.data)
-
-// 历年给分 —— 一个老师所有课（「查老师」弹层）
-export const getTeacherCourses = (teacher: string, years: string[] = []) =>
-  api.get<TeacherCoursesResp>(`/coursestats/teacher?teacher=${encodeURIComponent(teacher)}` +
-    (years.length ? `&years=${years.join(',')}` : '')).then(r => r.data)
-
-// 给分查询 —— 模糊搜索（mode=course 按课名 / teacher 按老师）
-export const searchGrades = (q: string, mode: 'course' | 'teacher', years: string[] = []) =>
-  api.get<import('../types').GradeSearchResp>(
-    `/coursestats/search?q=${encodeURIComponent(q)}&mode=${mode}` +
-    (years.length ? `&years=${years.join(',')}` : '')).then(r => r.data)
-
-// 历年给分 —— 已导入的年份
-export const getGradeYears = () =>
-  api.get<{ years: { year: string; teacher_rows: number; graded: number }[] }>('/coursestats/years')
-    .then(r => r.data)
-
-// 批量按 (范围+年份) 算给分，供课程池徽章实时重算
-export const batchGradeStats = (
-  items: { course: string; teacher: string }[],
-  scope: 'course' | 'teacher',
-  years: string[],
-) => api.post<{ results: GradeStats[] }>('/coursestats/batch', { items, scope, years }).then(r => r.data)
-
-// 历年给分 —— 导入某年宽表 CSV / 删除某年（仅管理员）。
-// 直接传原始 File（不在前端解码），后端读原始字节自行试 utf-8/gb18030，避免 GBK 乱码。
-export const importGradeCsv = (year: string, data: File | string) =>
-  api.post(`/coursestats/import?year=${encodeURIComponent(year)}`, data, {
-    headers: { 'Content-Type': 'text/plain' },
-  }).then(r => r.data as { year: string; teacher_rows: number; courses: number; graded: number })
-
-export const deleteGradeYear = (year: string) =>
-  api.delete(`/coursestats/${encodeURIComponent(year)}`).then(r => r.data)

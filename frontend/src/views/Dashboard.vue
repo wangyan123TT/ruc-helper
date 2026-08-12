@@ -6,15 +6,14 @@ import { useStudents } from '../composables/useStudents'
 import SideNav from '../components/SideNav.vue'
 import AccountsView from '../components/admin/AccountsView.vue'
 import MonitorView from '../components/admin/MonitorView.vue'
-import DataView from '../components/admin/DataView.vue'
 
-// 管理台 = 薄外壳。三块各自成视图：账号管理 / 成绩监控 / 数据管理。
+// 管理台 = 薄外壳。两块各自成视图：账号管理 / 成绩监控。
 const router = useRouter()
 const { students } = useStudents()
 
-type Nav = 'accounts' | 'monitor' | 'data'
+type Nav = 'accounts' | 'monitor'
 const nav = ref<Nav>('accounts')
-const NAV_TITLE: Record<Nav, string> = { accounts: '账号管理', monitor: '成绩监控', data: '数据管理' }
+const NAV_TITLE: Record<Nav, string> = { accounts: '账号管理', monitor: '成绩监控' }
 
 const identity = { seal: '管', name: '管理员', sub: '微人大选课助手 · admin' }
 const navGroups = computed(() => [
@@ -22,7 +21,6 @@ const navGroups = computed(() => [
     label: '管理台', items: [
       { key: 'accounts', label: '账号管理', icon: 'roster', count: students.value.length || null },
       { key: 'monitor', label: '成绩监控', icon: 'bell' },
-      { key: 'data', label: '数据管理', icon: 'data' },
     ],
   },
 ])
@@ -48,7 +46,6 @@ async function doLogout() { await logout(); clearToken(); router.replace('/login
       <div class="body">
         <AccountsView v-if="nav === 'accounts'" />
         <MonitorView v-else-if="nav === 'monitor'" />
-        <DataView v-else-if="nav === 'data'" />
       </div>
     </div>
   </div>

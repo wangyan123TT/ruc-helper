@@ -9,7 +9,7 @@ import os
 
 from .database import init_db
 from .routers import (students, grades, monitor, settings, timetable, grab,
-                      auth, coursestats)
+                      auth)
 from .services import grab as grab_svc
 from .services import monitor as monitor_svc
 
@@ -43,7 +43,6 @@ app.include_router(monitor.router)
 app.include_router(settings.router)
 app.include_router(timetable.router)
 app.include_router(grab.router)
-app.include_router(coursestats.router)
 
 
 @app.get("/api/health")
