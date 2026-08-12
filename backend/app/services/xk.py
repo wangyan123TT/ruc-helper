@@ -109,6 +109,22 @@ class Jw:
             return d.get("data")
         raise ApiError(f"{path.rsplit('/', 1)[-1]} 请求失败（重试3次）：{last}")
 
+    def write(self, path, api_code, body, res_code="XSMH0303"):
+        """写操作：单次请求，绝不重试（避免网络抖动造成重复提交）。返回 (ok, message)。"""
+        url = f"{RES}{path}?resourceCode={res_code}&apiCode={api_code}"
+        h = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/plain, */*",
+            "app": "PCWEB", "locale": "zh_CN", "token": self.token,
+            "userrolecode": "student",
+            "Cookie": f"SESSION={self.session}; authcode={self.authcode}",
+            "Referer": f"{BASE}/Njw2017/index.html",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        }
+        r = requests.post(url, json=body or {}, headers=h, timeout=30)
+        d = r.json()
+        return (d.get("errorCode") == "success"), (d.get("errorMessage") or "")
+
 
 def _parse_weeks(s):
     """周次串 -> 周次整数集合。兼容 '1,2,3' 展开式与 '1-16'/'1-8,10-16' 区间式。"""
@@ -406,6 +422,14 @@ def fetch_grab_context(jw):
     ctx["mode_code"] = str(km.get("xkcscode12"))
     ctx["mode"] = km.get("trfs_name") or ""
     ctx["ctrl"] = km.get("xtkz_name") or ""
+    # 提交(saveStuXkByRmdx)所需的活动级字段，逆向自选课页 basicSet 的 payload
+    ctx["xkcscode7"] = str(km.get("xkcscode7") or "0")
+    ctx["xkcscode23"] = str(km.get("xkcscode23") or "0")
+    ctx["xkfs_name"] = km.get("xkfs_name") or ""
+    ctx["xkfscode"] = str(km.get("xkfscode") or "")   # -> 提交里的 xkfsid
+    ctx["km_xkgl017id"] = km.get("xkgl017id") or ctx["xkgl017id"]
+    ctx["isTqxd"] = ent.get("isTqxd")
+    ctx["language"] = ent.get("language") or ""
 
     periods = []
     for m in (ent.get("kbSj") or []):
@@ -536,6 +560,7 @@ def fetch_pool(jw, ctx, kclbcode, params=None):
         if v not in (None, ""):
             body[k] = v
     d = jw.post(f"{XK}/findKcInfoByflByRmdx", f"{CC}.findKcInfoByflByRmdx", body)
+    sfjc = d.get("sfjcxskbcode")          # 提交里的 xkcscode1（该池统一）
     out = []
     for c in (d.get("showKclist") or []):
         cap = _int(c.get("xxrs"))          # 限选人数(容量)
@@ -555,8 +580,126 @@ def fetch_pool(jw, ctx, kclbcode, params=None):
             "surplus": (cap - enrolled) if (cap is not None and enrolled is not None) else None,
             "slots": slots,
             "raw": c,
+            "sfjcxskbcode": sfjc,
+            "pool_params": params or {},
         })
     return out
+
+
+def _numstr(v):
+    """对齐前端 a.zxs.toString()：整数值去掉 .0（32.0 -> '32'，2.5 -> '2.5'）。"""
+    if v in (None, ""):
+        return ""
+    try:
+        f = float(v)
+        return str(int(f)) if f == int(f) else str(f)
+    except (TypeError, ValueError):
+        return str(v)
+
+
+def _sksj_from_kbinfo(s):
+    """把 kbinfo 还原成提交体里的 sksj 数组，完全照搬选课页 analystsURL 的构造：
+    每段 '@' 分隔，[0]周次显示 [1]周次明细 [2]星期(1位)+节次 [5]开始 [6]结束。"""
+    week_cn = {1: "星期一", 2: "星期二", 3: "星期三", 4: "星期四",
+               5: "星期五", 6: "星期六", 7: "星期日"}
+    out = []
+    for seg in (s or "").split("~"):
+        seg = seg.strip()
+        if not seg:
+            continue
+        e = seg.split("@")
+        if len(e) < 3:
+            continue
+        zc, zcmx = e[0], (e[1] if len(e) > 1 else "")
+        xq, jc = e[2][:1], e[2][1:]
+        if not (zc and xq and jc):
+            continue
+        kssj = int(e[5]) if len(e) > 5 and e[5].isdigit() else ""
+        jssj = int(e[6]) if len(e) > 6 and e[6].isdigit() else ""
+        try:
+            wname = week_cn.get(int(xq), "")
+        except ValueError:
+            wname = ""
+        name = f"{wname} {jc[:2]}-{jc[-2:]}节 {zc}周"
+        out.append({"zc": zc, "zcmx": zcmx, "kssj": kssj, "jssj": jssj,
+                    "xq": xq, "jc": jc, "name": name})
+    return out
+
+
+def submit_course(jw, ctx, course):
+    """时间优先阶段提交选课（saveStuXkByRmdx）。仅由抢课服务在护栏内调用。
+
+    提交体逐字段对齐选课页 JS 的 basicSet -> saveStuXk(i)：约 50 字段，来源分三处 ——
+      · 课程行(raw)：kkdwbh/tzdlb_name/kkdw_name/skls_name/kkdwid/kcbh/ktmc_name/…/kbinfo→sksj
+      · 活动(ctx，取自 xkkzMap/entry)：xkcscode7/23、xkfs_name、xkfsid、isTqxd、xkgl017id
+      · 课程池响应：sfjcxskbcode -> xkcscode1
+    单次请求、不重试；本函数只选不退（saveStuTxByRmdx 全项目不写）。返回 (ok, msg)。"""
+    raw = course.get("raw") or {}
+    if not raw.get("id"):
+        return False, "缺教学班 id，跳过提交"
+    params = course.get("pool_params") or {}
+    kclb_mapper = str(raw.get("kclbMapper") or raw.get("kclbcode")
+                      or course.get("kclbcode") or "")
+    body = {
+        "xkcscode7": ctx.get("xkcscode7"),
+        "kkdwbh": raw.get("kkdwbh"),
+        "xkfl": [],
+        "tzdlb_name": raw.get("tzdlb_name"),
+        "xkfs_name": ctx.get("xkfs_name"),
+        "kkdw_name": raw.get("kkdw_name"),
+        "skls_name": raw.get("skls_name"),
+        "jczy007ids": raw.get("jczy007ids"),
+        "jczy003id": raw.get("kkdwid"),
+        "kcbh": raw.get("kcbh"),
+        "ktmc_name": raw.get("ktmc_name"),
+        "kcxz_name": raw.get("kcxz_name"),
+        "kcmc_name": raw.get("kcmc_name"),
+        "kcxz": raw.get("kcxzcode"),
+        "xq_name": raw.get("xq_name"),
+        "id": raw.get("id"),
+        "jczy013id": ctx.get("jczy013id"),
+        "zxs": _numstr(raw.get("zxs")),
+        "zxf": _numstr(raw.get("zxf")),
+        "kcdl": raw.get("kcdlcode"),
+        "kclb": raw.get("kclbcode"),
+        "khfs": raw.get("khfscode"),
+        "kkgl00401id": raw.get("xnkkgl00401id"),
+        "szkclb": raw.get("szkclbcode"),
+        "falb": "1",
+        "xkfsid": ctx.get("xkfscode"),
+        "xkgl017id": raw.get("xkgl017id") or ctx.get("km_xkgl017id") or ctx.get("xkgl017id"),
+        "xkgl019id": ctx.get("xkgl019id"),
+        "isTqxd": ctx.get("isTqxd"),
+        "xkzy": "",
+        "trz": "",
+        "tzdlb": raw.get("tzdlbcode"),
+        "jczy010id": raw.get("jczy010id"),
+        "skfscode": raw.get("skfscode"),
+        "skfs_name": raw.get("skfs_name"),
+        "sksj": _sksj_from_kbinfo(raw.get("kbinfo")),
+        "xkcscode1": str(course.get("sfjcxskbcode") if course.get("sfjcxskbcode") is not None else "1"),
+        "xkcscode23": ctx.get("xkcscode23"),
+        "sfglymkccode": False,
+        "sfglctkccode": False,
+        "kclbMapper": kclb_mapper,
+        "xklbbh": ctx.get("xklbbh"),
+        "bllsZyId": ctx.get("bllsZyId"),
+        "isSxrz": params.get("isSxrz") or "",
+        "language": ctx.get("language") or "",
+        "xxklbcode": params.get("xxklbcode") or raw.get("xxklbcode") or "",
+    }
+    # 特殊课程类型字段：仅当课程行里确有该键才带（对齐前端 JSON 丢弃 undefined 的行为）
+    for k in ("yyBfb", "yyjf", "pyfa01201id", "zc"):
+        if k in raw:
+            body[k] = raw.get(k)
+    if params.get("honerItemId"):
+        body["honerItemId"] = params["honerItemId"]
+
+    try:
+        ok, msg = jw.write(f"{XK}/saveStuXkByRmdx", f"{CC}.saveStuXkByRmdx", body)
+    except Exception as e:
+        return False, f"提交异常: {str(e)[:60]}"
+    return ok, (msg or ("提交成功" if ok else "提交被拒"))
 
 
 def find_in_pool(pool, course_key):

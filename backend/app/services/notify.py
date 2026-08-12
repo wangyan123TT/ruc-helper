@@ -21,7 +21,7 @@ LINE = "#eceaf1"
 CINNABAR = "#c41e3a"
 JADE = "#1a7a5a"
 GOLD = "#b8860b"
-APP_URL = "http://49.232.145.138:8080/"
+APP_URL = "http://49.233.204.197:8080/"
 
 
 def send_html(to_address: str, subject: str, html: str) -> bool:
@@ -129,6 +129,7 @@ def send_grab_email(to_address: str, student_name: str, event: str,
         "success": ("抢课成功", f"已抢到「{course_name}」", JADE),
         "ready": ("出现名额", f"「{course_name}」有名额了", GOLD),
         "conflict": ("时间冲突", f"「{course_name}」与已选课冲突，已停止", CINNABAR),
+        "failed": ("抢课异常", f"「{course_name}」有名额却提交失败，已停止", CINNABAR),
     }.get(event, ("抢课通知", course_name, CINNABAR))
     kicker, title, accent = meta
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

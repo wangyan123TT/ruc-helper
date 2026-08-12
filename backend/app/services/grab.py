@@ -19,6 +19,7 @@
 """
 import asyncio
 import json
+import time as _time
 from datetime import datetime, time, timezone, timedelta
 
 from ..database import SessionLocal
@@ -28,14 +29,15 @@ from . import xk
 
 TZ = timezone(timedelta(hours=8))
 
-FAST_INTERVAL = 2       # 时间优先窗口内的轮询间隔(秒)
+FAST_INTERVAL = 2       # 时间优先窗口内「每轮总耗时」目标(秒)：sleep 会补偿轮询耗时凑满它
+FAST_FLOOR = 0.1        # 快节奏下即便轮询已超时也至少睡这么久，避免完全贴死空转
 IDLE_INTERVAL = 30      # 非窗口/夜间的探测间隔(秒)
 DAY_START = time(7, 0)  # 白天释放名额时段
 DAY_END = time(23, 0)
 
 _grab_task: "asyncio.Task | None" = None
-# 段2 的总扳机：False = 只检测不提交(当前)。段2 接入并测试后才允许置 True。
-_ARMED = False
+# 段2 总扳机：True = 时间优先窗口内真提交。护栏：仅 mode=时间优先+在窗口+有余额+无冲突+未选上才提交，永不退课。
+_ARMED = True
 
 # 活跃状态：还在争取的目标（success/stopped/conflict 都算已了结）
 ACTIVE = ("waiting", "ready", "grabbing")
@@ -73,23 +75,41 @@ def _in_grab_window(ctx) -> bool:
     return True   # 时间字段缺失时，以 mode_code 为准
 
 
-def _set(db, t: GrabTarget, status: str, msg: str):
+def _set(db, t: GrabTarget, status: str, msg: str) -> bool:
+    """更新目标状态。返回 True 表示发生了跳变（据此决定是否发邮件，避免重复通知）。"""
     if t.status != status or t.message != msg:
         t.status = status
         t.message = msg
         t.updated_at = now()
         db.commit()
+        return True
+    return False
+
+
+def _is_race_fail(msg: str) -> bool:
+    """提交失败是否属于「名额刚被抢走/已满」这类可重试的手速竞争（而非字段结构错）。
+    教务对满员返回 eywxt.save.stuLimit.error。竞争类不计入熔断，继续抢。"""
+    m = (msg or "").lower()
+    return any(k in m for k in ("stulimit", "limit", "满", "名额", "full"))
+
+
+def _notify(student: Student, event: str, course_name: str, detail: str):
+    """抢课事件邮件提醒。邮件失败绝不影响抢课主流程。"""
+    to = getattr(student, "email", None)
+    if not to:
+        return
+    try:
+        from .notify import send_grab_email
+        send_grab_email(to, student.name or student.student_id, event, course_name, detail)
+    except Exception as e:
+        print(f"[grab] 邮件通知失败: {e}")
 
 
 def _submit(jw, ctx, target, course) -> tuple[bool, str]:
-    """
-    段2 占位：真正的提交在这里接入 saveStuXkByRmdx。
-    当前未接入 —— 返回 (False, 原因)，绝不产生任何写操作。
-    """
+    """段2：调用 saveStuXkByRmdx 真提交。仅在 _ARMED 且已过所有护栏时到达这里。"""
     if not _ARMED:
-        return False, "检测到名额（提交功能未启用，请手动确认或等待段2接入）"
-    # --- 段2 将在此调用 xk.submit_course(jw, ctx, course) ---
-    return False, "提交通道未接入"
+        return False, "检测到名额（提交功能未启用）"
+    return xk.submit_course(jw, ctx, course)
 
 
 def poll_student_targets(db, student: Student) -> dict:
@@ -153,7 +173,11 @@ def poll_student_targets(db, student: Student) -> dict:
         conflict = sorted(xk.slot_cells(course["slots"]) & grabbed_cells)
         if conflict:
             human = "、".join(f"周{'一二三四五六日'[d-1]}第{p}节" for d, p in conflict)
-            _set(db, t, "conflict", f"与已选课时间冲突（{human}），已停止")
+            if _set(db, t, "conflict", f"与已选课时间冲突（{human}），已停止"):
+                print(f"[grab] {datetime.now(TZ):%H:%M:%S} ✖ 冲突停止 {student.student_id} "
+                      f"《{t.course_name}》：{human}", flush=True)
+                _notify(student, "conflict", t.course_name,
+                        f"与已选课程时间冲突（{human}），已自动停止争抢。")
             continue
 
         if not in_window:
@@ -165,13 +189,38 @@ def poll_student_targets(db, student: Student) -> dict:
         surplus = course["surplus"]
         if surplus is not None and surplus > 0:
             t.attempts = (t.attempts or 0) + 1
+            ts = datetime.now(TZ).strftime("%H:%M:%S")
+            print(f"[grab] {ts} 发现名额 {student.student_id} 《{t.course_name}》"
+                  f" 余{surplus}（{course['enrolled']}/{course['cap']}）→ 第{t.attempts}次提交…", flush=True)
             ok, msg = _submit(jw, ctx, t, course)
             if ok:
                 grabbed_cells |= xk.slot_cells(course["slots"])
-                _set(db, t, "success", f"已抢到！{course['class_name']}")
+                print(f"[grab] {ts} 🎉 抢到！{student.student_id} 《{t.course_name}》"
+                      f" —— {course['class_name']}", flush=True)
+                if _set(db, t, "success", f"已抢到！{course['class_name']}"):
+                    _notify(student, "success", t.course_name,
+                            f"已成功抢到「{course['class_name']}」，恭喜！")
+            elif _is_race_fail(msg):
+                # 名额刚被别人抢走/瞬间满员：手速竞争，不计入熔断，继续盯着抢
+                print(f"[grab] {ts} 名额被抢先一步 {student.student_id} 《{t.course_name}》"
+                      f"（{msg}），继续盯", flush=True)
+                t.attempts = 0
+                _set(db, t, "grabbing", f"名额被抢先一步，继续盯（{msg}）")
+            elif t.attempts >= 6:
+                # 有名额却连抢 6 次结构性失败 → 疑似提交字段问题，停手防止空刷教务
+                print(f"[grab] {ts} ⚠ 熔断停手 {student.student_id} 《{t.course_name}》"
+                      f"：连抢{t.attempts}次结构性失败（{msg}）", flush=True)
+                if _set(db, t, "failed",
+                        f"有名额却提交失败 {t.attempts} 次已停（{msg}）——疑似接口字段问题，请人工检查"):
+                    _notify(student, "failed", t.course_name,
+                            f"检测到名额但连续 {t.attempts} 次提交失败（{msg}），已自动停止。"
+                            f"可能是选课接口字段变化，需要人工检查。")
             else:
-                _set(db, t, "ready", f"有名额（余{surplus}）· {msg}")
+                print(f"[grab] {ts} 提交失败 {student.student_id} 《{t.course_name}》"
+                      f" 第{t.attempts}次（{msg}），重试", flush=True)
+                _set(db, t, "ready", f"有名额（余{surplus}）· 第{t.attempts}次尝试 · {msg}")
         else:
+            t.attempts = 0   # 名额没了 → 重置连续尝试计数
             _set(db, t, "grabbing", f"盯着·余{surplus if surplus is not None else '?'}"
                  f"（已选{course['enrolled']}/容量{course['cap']}）")
 
@@ -186,7 +235,8 @@ def poll_student_targets(db, student: Student) -> dict:
 async def _loop():
     print("[grab] 抢课检测循环启动")
     while True:
-        interval = IDLE_INTERVAL
+        sleep_s = IDLE_INTERVAL
+        t0 = _time.monotonic()
         try:
             db = SessionLocal()
             students = (db.query(Student)
@@ -200,13 +250,22 @@ async def _loop():
                     any_window = any_window or r.get("in_window")
                 except Exception as e:
                     print(f"[grab] 轮询 {s.student_id} 异常: {e}")
-            db.close()
             # 时间优先窗口 & 白天 -> 快节奏；否则慢节奏
-            if any_window and _daytime(datetime.now(TZ)):
-                interval = FAST_INTERVAL
+            fast = any_window and _daytime(datetime.now(TZ))
+            elapsed = _time.monotonic() - t0
+            # 快节奏：sleep 补偿掉轮询耗时，让「每轮总耗时」凑满 FAST_INTERVAL（真·2秒节奏）
+            sleep_s = max(FAST_FLOOR, FAST_INTERVAL - elapsed) if fast else IDLE_INTERVAL
+            # 每轮心跳：即便全满员也打一行，日志里直接看到真实节奏
+            active = db.query(GrabTarget).filter(GrabTarget.status.in_(ACTIVE)).all()
+            ts = datetime.now(TZ).strftime("%H:%M:%S")
+            watch = "、".join(f"{t.course_name[:8]}" for t in active) or "无"
+            print(f"[grab] {ts} 轮询一轮 · {'窗口内' if any_window else '非窗口'} · "
+                  f"盯{len(active)}门（{watch}）· 轮询{elapsed:.1f}s+睡{sleep_s:.1f}s≈每轮{elapsed + sleep_s:.1f}s",
+                  flush=True)
+            db.close()
         except Exception as e:
             print(f"[grab] 循环异常: {e}")
-        await asyncio.sleep(interval)
+        await asyncio.sleep(sleep_s)
 
 
 def start_grab():
