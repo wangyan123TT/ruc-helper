@@ -2,10 +2,7 @@
   "_comment": "复制此文件为 config.json 并填入真实凭据。Copy this to config.json with real credentials.",
   "baseUrl": "https://jw.ruc.edu.cn",
   "auth": {
-    "_如何获取_course": "选课API: 浏览器登录 jw.ruc.edu.cn → F12 → Application → Cookies → 复制 EL-ADMIN-TOEKN 和完整 Cookie",
-    "token": "你的_EL-ADMIN-TOEKN（用于选课API，Bearer鉴权）",
-    "cookie": "access_token=xxx; SESSION=xxx; EL-ADMIN-TOEKN=xxx",
-    "_如何获取_grade": "成绩API: 运行 get_token.py 自动获取，或手动填入以下三项",
+    "_如何获取": "运行 get_token.py 自动获取，或手动填入以下三项",
     "resToken": "成绩API的JWT（运行 get_token.py 自动填入）",
     "session": "成绩API的SESSION（运行 get_token.py 自动填入）",
     "authcode": "学号（运行 get_token.py 自动填入）"
@@ -16,40 +13,6 @@
     "email": "邮箱",
     "major": "专业",
     "grade": "年级"
-  },
-  "semester": {
-    "id": "2025-2026-1",
-    "name": "2026 Summer School",
-    "current": true
-  },
-  "apis": {
-    "sessionUserInfo": "/qsmart/common/sessionUserInfo",
-    "menuTree": "/qsmart/common/menu/userMenuTree",
-    "semesterList": "/minJwxt/mgmt/public/service/querySemesterListBySelect",
-    "academyList": "/minJwxt/mgmt/public/service/queryAcademyListBySelect",
-    "getStuInfo": "/minJwxt/mgmt/student/course/getStuInfo",
-    "checkSelectCourseTime": "/minJwxt/mgmt/student/course/checkSelectCourseTime",
-    "queryCourseOfferList": "/minJwxt/mgmt/student/course/queryCourseOfferListByPage",
-    "queryStuCourseOfferList": "/minJwxt/mgmt/student/course/queryStuCourseOfferListByPage",
-    "selectCourse": "/minJwxt/mgmt/student/course/selectCourse",
-    "selectCourseByInner": "/minJwxt/mgmt/student/course/selectCourseByInner",
-    "deleteStuCourseInfo": "/minJwxt/mgmt/student/course/deleteStuCourseInfo",
-    "cancelSelectCourse": "/minJwxt/mgmt/student/course/cancelSelectCourse",
-    "save": "/minJwxt/mgmt/student/course/save",
-    "checkCourseSurplusCapacity": "/minJwxt/mgmt/student/course/checkCourseSurplusCapacity",
-    "checkCourseSelected": "/minJwxt/mgmt/student/course/checkCourseSelected",
-    "checkCourseSettleTime": "/minJwxt/mgmt/student/course/checkCourseSettleTime",
-    "selectCourseCheckForConflicts": "/minJwxt/mgmt/student/course/selectCourseCheckForConflicts",
-    "confirmCrsDeclare": "/minJwxt/mgmt/student/course/confirmCrsDeclare",
-    "getStuCourseNum": "/minJwxt/mgmt/student/course/getStuCourseNum",
-    "checkStuLabel": "/minJwxt/mgmt/student/course/checkStuLabel",
-    "cheCourseTimeContr": "/minJwxt/mgmt/student/course/cheCourseTimeContr",
-    "checkContactInfo": "/minJwxt/mgmt/student/course/checkContactInfo",
-    "getNewDate": "/minJwxt/mgmt/student/stuPay/getNewDate",
-    "queryCourseSettleList": "/minJwxt/mgmt/student/course/queryCourseSettleListByPage",
-    "queryZeroOrOneCourse": "/minJwxt/mgmt/student/course/queryZeroOrOneCourse",
-    "RecordUnpaidCourses": "/minJwxt/mgmt/student/course/RecordUnpaidCourses",
-    "getStuLabelCourseNum": "/minJwxt/mgmt/student/course/getStuLabelCourseNum"
   },
   "grade": {
     "apiPath": "/resService/jwxtpt/v1/xsd/cjgl_xsxdsq/findKccjList",
@@ -64,7 +27,5 @@
     "smtpPassword": "QQ邮箱授权码",
     "fromAddress": "你的QQ邮箱@qq.com",
     "toAddress": "接收通知的邮箱"
-  },
-  "blacklist": [],
-  "targets": []
+  }
 }

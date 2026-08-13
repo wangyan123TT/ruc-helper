@@ -5,7 +5,6 @@
 config.json
 
 # 运行日志
-auto_course.log
 auto_grade.log
 
 # Python / uv

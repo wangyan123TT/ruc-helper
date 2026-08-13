@@ -396,15 +396,15 @@ pageSize 上限约 1000-2000 之间，1000 稳定可用。
 
 ---
 
-## 六、认证体系对比
+## 六、认证体系
 
-| | 选课操作类 API | 数据查询类 API (XSMH) |
-|---|---|---|
-| 路径 | `/minJwxt/mgmt/...` | `/resService/jwxtpt/v1/...` |
-| 鉴权头 | `Authorization: Bearer <xxx>` | `token: <JWT>` |
-| Cookie | `access_token`, `SESSION`, `EL-ADMIN-TOEKN` | `SESSION`, `authcode` |
-| 获取方式 | 浏览器 F12 手动复制 | `/secService/login` 自动获取 |
-| Token 有效期 | ~4小时 | ~12小时 |
+| | 数据查询类 API (XSMH) |
+|---|---|
+| 路径 | `/resService/jwxtpt/v1/...` |
+| 鉴权头 | `token: <JWT>` |
+| Cookie | `SESSION`, `authcode` |
+| 获取方式 | `/secService/login` 自动获取 |
+| Token 有效期 | ~12小时 |
 
 ---
 

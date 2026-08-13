@@ -7,8 +7,7 @@
 ```
 ├── cli/                        # CLI 工具
 │   ├── get_token.py            #   通过学号密码获取 Token
-│   ├── auto_grade.py           #   自动轮询成绩变动
-│   └── auto_course.py          #   自动抢课（需额外凭据）
+│   └── auto_grade.py           #   自动轮询成绩变动
 ├── backend/                    # FastAPI 后端
 │   ├── Dockerfile
 │   └── app/
@@ -60,38 +59,24 @@ uv run cli/get_token.py
 
 # 自动查成绩（轮询模式）
 uv run cli/auto_grade.py
-
-# 自动抢课（需先手动获取 EL-ADMIN-TOEKN）
-uv run cli/auto_course.py
 ```
 
 CLI 工具依赖根目录的 `config.json`（从 `config.example.json` 复制并填写凭据）。
 
 ## 凭据获取
 
-### 成绩查询（自动）
-
 运行 `get_token.py`，输入学号+密码即可自动获取 Token 并写入 `config.json`。
-
-### 选课（手动）
-
-选课 API 需要 `EL-ADMIN-TOEKN`（与成绩 API 是不同的认证体系），需从浏览器手动提取：
-
-1. 浏览器登录 [jw.ruc.edu.cn](https://jw.ruc.edu.cn)
-2. F12 → Application → Cookies → jw.ruc.edu.cn
-3. 复制 `EL-ADMIN-TOEKN`、`access_token`、`SESSION`
-4. 填入 `config.json` 的 `auth` 字段
 
 ## API 架构
 
-系统有两套独立的认证和 API 网关：
+选课与成绩共用同一套 `resService` 网关和认证：
 
-| | 选课 API | 成绩 API |
-|------|----------|----------|
-| 路径 | `/minJwxt/mgmt/...` | `/resService/jwxtpt/v1/...` |
-| 鉴权头 | `Authorization: Bearer <EL-ADMIN-TOEKN>` | `token: <JWT>` |
-| Cookie | `access_token`, `SESSION`, `EL-ADMIN-TOEKN` | `SESSION`, `authcode` |
-| 获取方式 | 浏览器 F12 手动复制 | `get_token.py` 自动获取 |
+| | 说明 |
+|------|----------|
+| 路径 | `/resService/jwxtpt/v1/...` |
+| 鉴权头 | `token: <JWT>` |
+| Cookie | `SESSION`, `authcode` |
+| 获取方式 | `get_token.py` 自动获取 |
 
 ## 技术栈
 

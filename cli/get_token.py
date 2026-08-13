@@ -3,7 +3,7 @@
 人大教务系统 — 通过账号密码获取 Token
 
 调用 /secService/login 登录，获取 JWT + SESSION 后自动写入 config.json，
-供 auto_course.py / auto_grade.py 使用。
+供 auto_grade.py 使用。
 
 用法:
     uv run get_token.py
@@ -103,7 +103,6 @@ def main():
     save_config(cfg)
     print(f"  [{ts()}] resToken / session / authcode 已写入 config.json")
     print(f"  [{ts()}] 可运行 auto_grade.py（成绩查询）")
-    print(f"  [{ts()}] 注意: 选课 API 仍需手动获取 EL-ADMIN-TOEKN，参见 README.md")
 
 
 if __name__ == "__main__":
