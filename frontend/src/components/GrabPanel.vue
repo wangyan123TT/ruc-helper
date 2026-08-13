@@ -244,7 +244,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
           <ul v-else class="pool-list">
             <li v-for="c in sortedPool" :key="c.course_key" class="pc"
                 :class="{ conflicted: c.conflict.length, added: targetKeys.has(c.course_key) }">
-              <!-- 左：课程信息（两行）。点老师名=查该老师历年课 -->
+              <!-- 左：课程信息（两行） -->
               <div class="pc-info">
                 <div class="pc-title">
                   <span class="pc-name">{{ c.name }}</span>
